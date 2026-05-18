@@ -2,3 +2,5 @@ node_modules/
 dist/
 .env
 *.js.map
+excluded-jobs.json
+
