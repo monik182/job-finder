@@ -51,6 +51,8 @@ In your repo go to **Settings → Secrets and variables → Actions** and add:
 npm run dev
 ```
 
+> **Note:** Use `npm run dev` (not `npm start`) locally — it loads your `.env` file via Node's `--env-file` flag. `npm start` skips `.env` and is used by GitHub Actions, where secrets are injected directly into the environment.
+
 ### 5. Trigger manually in GitHub Actions
 
 Go to **Actions → Daily Job Search → Run workflow**.
