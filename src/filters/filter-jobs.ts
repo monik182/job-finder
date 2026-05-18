@@ -1,4 +1,5 @@
-import { type RawJob, type FilteredJob } from '../types.js';
+import { writeFileSync, readFileSync } from 'node:fs';
+import { type RawJob, type FilteredJob, type ExcludedJob, type ExcludedJobsStore } from '../types.js';
 
 // ─── Hard exclusion patterns ───────────────────────────────────────────────
 
@@ -51,18 +52,18 @@ function extractSalaryPriority(text: string): string | null {
     const normalizedAnnual = isHourly
       ? amount * 2_000
       : isAnnual
-      ? amount
-      : amount < 500
-      ? amount * 2_000 // likely hourly rate
-      : amount;
+        ? amount
+        : amount < 500
+          ? amount * 2_000 // likely hourly rate
+          : amount;
 
     const normalizedHourly = isHourly
       ? amount
       : isAnnual
-      ? amount / 2_000
-      : amount >= 500
-      ? amount / 2_000
-      : amount;
+        ? amount / 2_000
+        : amount >= 500
+          ? amount / 2_000
+          : amount;
 
     if (normalizedAnnual >= 80_000 || normalizedHourly >= 40) {
       return `salary $${Math.round(normalizedHourly)}/hr`;
@@ -85,29 +86,49 @@ function isRemote(job: RawJob): boolean {
   return INCLUDE_REMOTE.test(combined);
 }
 
-export function filterJobs(jobs: RawJob[]): FilteredJob[] {
-  const results: FilteredJob[] = [];
+export interface FilterResult {
+  filtered: FilteredJob[];
+  excluded: ExcludedJob[];
+}
+
+export function filterJobs(jobs: RawJob[]): FilterResult {
+  const filtered: FilteredJob[] = [];
+  const excluded: ExcludedJob[] = [];
+  const excludedAt = new Date().toISOString();
 
   for (const job of jobs) {
     const combined = `${job.title} ${job.description}`;
+    const exclusionReasons: string[] = [];
 
     // ── Pass 1: Hard exclusions ────────────────────────────────────────────
-    if (EXCLUDE_US_ONLY.test(combined)) continue;
-    if (EXCLUDE_CLEARANCE.test(combined)) continue;
-    if (EXCLUDE_C_LEVEL.test(job.title)) continue;
-    if (EXCLUDE_INTERN.test(job.title)) continue;
-    if (EXCLUDE_ON_SITE.test(combined)) continue;
+    if (EXCLUDE_US_ONLY.test(combined)) exclusionReasons.push('us-only');
+    if (EXCLUDE_CLEARANCE.test(combined)) exclusionReasons.push('clearance-required');
+    if (EXCLUDE_C_LEVEL.test(job.title)) exclusionReasons.push('c-level-title');
+    if (EXCLUDE_INTERN.test(job.title)) exclusionReasons.push('intern-or-junior');
+    if (EXCLUDE_ON_SITE.test(combined)) exclusionReasons.push('on-site-or-hybrid');
 
     // ── Pass 2: Required inclusions ────────────────────────────────────────
-    if (!INCLUDE_TECH.test(combined)) continue;
-    if (!INCLUDE_ROLE.test(combined)) continue;
-    if (!isRemote(job)) continue;
-    if (!isPostedWithin24h(job.datePosted, job.scrapedAt)) continue;
+    if (!INCLUDE_TECH.test(combined)) exclusionReasons.push('no-tech-match');
+    if (!INCLUDE_ROLE.test(combined)) exclusionReasons.push('no-role-match');
+    if (!isRemote(job)) exclusionReasons.push('not-remote');
+    if (!isPostedWithin24h(job.datePosted, job.scrapedAt)) exclusionReasons.push('too-old');
 
-    // Contract check with full-time EMEA exception
-    const isContractType = INCLUDE_CONTRACT.test(combined);
-    const isFullTimeEmea = INCLUDE_FULLTIME_EMEA_EXCEPTION.test(combined);
-    if (!isContractType && !isFullTimeEmea) continue;
+    // Contract type check disabled — keeping for future use
+    // const isContractType = INCLUDE_CONTRACT.test(combined);
+    // const isFullTimeEmea = INCLUDE_FULLTIME_EMEA_EXCEPTION.test(combined);
+    // if (!isContractType && !isFullTimeEmea) exclusionReasons.push('no-contract-type');
+
+    if (exclusionReasons.length > 0) {
+      excluded.push({
+        title: job.title,
+        company: job.company,
+        url: job.url,
+        source: job.source,
+        excludedAt,
+        reasons: exclusionReasons,
+      });
+      continue;
+    }
 
     // ── Pass 3: Priority flags ─────────────────────────────────────────────
     const priorityReasons: string[] = [];
@@ -119,12 +140,27 @@ export function filterJobs(jobs: RawJob[]): FilteredJob[] {
     const salaryReason = extractSalaryPriority(combined);
     if (salaryReason) priorityReasons.push(salaryReason);
 
-    results.push({
+    filtered.push({
       ...job,
       isHighPriority: priorityReasons.length > 0,
       priorityReasons,
     });
   }
 
-  return results;
+  return { filtered, excluded };
+}
+
+export function saveExcludedJobs(path: string, newExclusions: ExcludedJob[]): void {
+  let store: ExcludedJobsStore;
+
+  try {
+    store = JSON.parse(readFileSync(path, 'utf-8')) as ExcludedJobsStore;
+  } catch {
+    store = { lastUpdated: new Date().toISOString(), jobs: [] };
+  }
+
+  store.jobs.push(...newExclusions);
+  store.lastUpdated = new Date().toISOString();
+
+  writeFileSync(path, JSON.stringify(store, null, 2), 'utf-8');
 }

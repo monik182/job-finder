@@ -21,6 +21,20 @@ export interface SeenJobsStore {
   hashes: string[];
 }
 
+export interface ExcludedJob {
+  title: string;
+  company: string;
+  url: string;
+  source: JobSource;
+  excludedAt: string;
+  reasons: string[];
+}
+
+export interface ExcludedJobsStore {
+  lastUpdated: string;
+  jobs: ExcludedJob[];
+}
+
 export interface ScrapeResult {
   source: JobSource;
   jobs: RawJob[];

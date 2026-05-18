@@ -4,13 +4,14 @@ import { getBrowser, closeBrowser } from './browser.js';
 import { scrapeAnywhereRemote } from './scrapers/anywhere-remote.js';
 import { scrapeYCombinator } from './scrapers/ycombinator.js';
 import { scrapeLinkedIn } from './scrapers/linkedin.js';
-import { filterJobs } from './filters/filter-jobs.js';
+import { filterJobs, saveExcludedJobs } from './filters/filter-jobs.js';
 import { loadSeenJobs, saveSeenJobs, deduplicateJobs } from './dedup/dedup.js';
 import { sendEmail } from './email/send-email.js';
 import { type EmailReport, type FilteredJob, type JobSource } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SEEN_JOBS_PATH = resolve(__dirname, '..', 'seen-jobs.json');
+const EXCLUDED_JOBS_PATH = resolve(__dirname, '..', 'excluded-jobs.json');
 
 function validateEnv(): void {
   const required = ['BROWSERLESS_API_KEY', 'RESEND_API_KEY', 'MY_EMAIL', 'FROM_EMAIL'];
@@ -45,10 +46,10 @@ async function main(): Promise<void> {
     results.push(await scrapeAnywhereRemote(browser));
 
     console.log('\n[main] Scraping Work at a Startup (YC)...');
-    results.push(await scrapeYCombinator(browser));
+    // results.push(await scrapeYCombinator(browser));
 
     console.log('\n[main] Scraping LinkedIn...');
-    results.push(await scrapeLinkedIn(browser));
+    // results.push(await scrapeLinkedIn(browser));
 
     const allRawJobs = results.flatMap((r) => r.jobs);
     results.forEach((r) => allErrors.push(...r.errors));
@@ -56,8 +57,8 @@ async function main(): Promise<void> {
     console.log(`\n[main] Total raw jobs collected: ${allRawJobs.length}`);
 
     // Filter
-    const filteredJobs = filterJobs(allRawJobs);
-    console.log(`[main] After filtering: ${filteredJobs.length}`);
+    const { filtered: filteredJobs, excluded: excludedJobs } = filterJobs(allRawJobs);
+    console.log(`[main] After filtering: ${filteredJobs.length} kept, ${excludedJobs.length} excluded`);
 
     // Dedup
     const store = loadSeenJobs(SEEN_JOBS_PATH);
@@ -96,6 +97,12 @@ async function main(): Promise<void> {
     // Persist updated seen-jobs.json
     saveSeenJobs(SEEN_JOBS_PATH, updatedStore);
     console.log(`[main] Updated seen-jobs.json (total hashes: ${updatedStore.hashes.length})`);
+
+    // Persist excluded jobs (dev only)
+    if (process.env['NODE_ENV'] === 'development') {
+      saveExcludedJobs(EXCLUDED_JOBS_PATH, excludedJobs);
+      console.log(`[main] Updated excluded-jobs.json (+${excludedJobs.length} exclusions)`);
+    }
 
     console.log('\n=== Job Finder complete ===');
   } finally {
