@@ -1,6 +1,25 @@
 import { writeFileSync, readFileSync } from 'node:fs';
 import { type RawJob, type FilteredJob, type ExcludedJob, type ExcludedJobsStore } from '../types.js';
 
+// ─── Time window configuration ────────────────────────────────────────────
+
+const DEFAULT_HOURS = 72;
+const MAX_HOURS = 6 * 30 * 24; // 6 months (4320 h)
+
+function parseHoursArg(): number {
+  const arg = process.argv.find((a) => a.startsWith('--hours='));
+  if (!arg) return DEFAULT_HOURS;
+
+  const parsed = parseFloat(arg.slice('--hours='.length));
+
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_HOURS;
+
+  const hours = Math.ceil(parsed);
+  return Math.min(hours, MAX_HOURS);
+}
+
+const HOURS_WINDOW = parseHoursArg();
+
 // ─── Hard exclusion patterns ───────────────────────────────────────────────
 
 const EXCLUDE_US_ONLY =
@@ -73,12 +92,13 @@ function extractSalaryPriority(text: string): string | null {
   return null;
 }
 
-function isPostedWithin24h(datePosted: string | null, scrapedAt: string): boolean {
+function isPostedWithinWindow(datePosted: string | null, scrapedAt: string): boolean {
   if (!datePosted) return false;
   const posted = new Date(datePosted).getTime();
   const scraped = new Date(scrapedAt).getTime();
   if (isNaN(posted) || isNaN(scraped)) return false;
-  return scraped - posted <= 24 * 60 * 60 * 1_000 + 60 * 60 * 1_000; // 25h buffer for clock skew
+  const windowMs = (HOURS_WINDOW + 1) * 60 * 60 * 1_000; // +1h buffer for clock skew
+  return scraped - posted <= windowMs;
 }
 
 function isRemote(job: RawJob): boolean {
@@ -111,7 +131,7 @@ export function filterJobs(jobs: RawJob[]): FilterResult {
     if (!INCLUDE_TECH.test(combined)) exclusionReasons.push('no-tech-match');
     if (!INCLUDE_ROLE.test(combined)) exclusionReasons.push('no-role-match');
     if (!isRemote(job)) exclusionReasons.push('not-remote');
-    if (!isPostedWithin24h(job.datePosted, job.scrapedAt)) exclusionReasons.push('too-old');
+    if (!isPostedWithinWindow(job.datePosted, job.scrapedAt)) exclusionReasons.push('too-old');
 
     // Contract type check disabled — keeping for future use
     // const isContractType = INCLUDE_CONTRACT.test(combined);
