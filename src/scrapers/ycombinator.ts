@@ -1,21 +1,21 @@
 import { type Browser } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
-import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
+import { newPage, delay, safeGoto } from './utils.js';
 
 const SOURCE = 'ycombinator' as const;
 const LOGIN_URL =
   'https://account.ycombinator.com/?continue=https%3A%2F%2Fwww.workatastartup.com%2F';
 const BASE_COMPANIES_URL =
   'https://www.workatastartup.com/companies?demographic=any&hasEquity=any&hasSalary=any&industry=any&interviewProcess=any&jobType=any&layout=list-compact&remote=only&role=eng&sortBy=created_desc&tab=any&usVisaNotRequired=true';
-const JOBS_PER_COMBINATION = 10; // 2 pages of 10 each via infinite scroll
+const JOBS_PER_COMBINATION = 20; // 2 pages of 10 each via infinite scroll
 
 const QUERIES = [
   { param: 'role_type', value: 'fe' },
-  // { param: 'role_type', value: 'fs' },
-  // { param: 'query', value: 'react' },
-  // { param: 'query', value: 'angular' },
-  // { param: 'query', value: 'nextjs' },
-  // { param: 'query', value: 'typescript' },
+  { param: 'role_type', value: 'fs' },
+  { param: 'query', value: 'react' },
+  { param: 'query', value: 'angular' },
+  { param: 'query', value: 'nextjs' },
+  { param: 'query', value: 'typescript' },
 ];
 
 function randomInt(min: number, max: number): number {
@@ -34,11 +34,11 @@ const SEL = {
   companyCards: 'div.directory-list > div',
   // Per-card, scoped to each company card
   companyName: 'div:first-child div:last-child div:first-child div:last-child div:first-child a span:first-child',
-  jobItems: 'div:nth-child(2) div:first-child > div div',
+  jobItems: 'div.px-3.pb-3.pt-3 div div div',
   // Per-job-item, scoped to each job item
   jobTitle: 'div:first-child div:first-child a',
   jobTags: 'div:first-child div:last-child',
-  jobLink: 'div:nth-child(2) a',
+  jobLink: 'div.mt-2.flex.flex-none.items-center a',
 } as const;
 
 interface RawJobData {
@@ -68,7 +68,7 @@ export async function scrapeYCombinator(browser: Browser): Promise<ScrapeResult>
 
   // --- Login ---
   try {
-    const loginOk = await safeGoto(page, LOGIN_URL, 30_000);
+    const loginOk = await safeGoto(page, LOGIN_URL, 10_000);
     if (!loginOk) {
       errors.push('[ycombinator] Failed to load login page');
       await page.close();
@@ -193,7 +193,7 @@ export async function scrapeYCombinator(browser: Browser): Promise<ScrapeResult>
           title: raw.title,
           company: raw.company,
           location: raw.tags,
-          datePosted: parseRelativeDate(null),
+          datePosted: scrapedAt,
           url: raw.url,
           description: raw.tags,
           source: SOURCE,
@@ -208,7 +208,7 @@ export async function scrapeYCombinator(browser: Browser): Promise<ScrapeResult>
       errors.push(msg);
     }
 
-    await delay(randomInt(2000, 4000), randomInt(2000, 4000));
+    await delay(randomInt(5000, 9000), randomInt(5000, 9000));
   }
 
   await page.close();

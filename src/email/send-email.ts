@@ -140,7 +140,7 @@ function buildNoJobsEmail(date: string): string {
 export async function sendEmail(report: EmailReport): Promise<void> {
   const apiKey = process.env['RESEND_API_KEY'];
   const to = process.env['MY_EMAIL'];
-  const from = process.env['FROM_EMAIL'];
+  const from = `Job Finder BOT <${process.env['FROM_EMAIL']}>`;
 
   if (!apiKey || !to || !from) {
     throw new Error('Missing email env vars: RESEND_API_KEY, MY_EMAIL, FROM_EMAIL');

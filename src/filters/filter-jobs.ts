@@ -38,7 +38,7 @@ const EXCLUDE_UAE =
 
 // ─── Required inclusion patterns ──────────────────────────────────────────
 
-const INCLUDE_TECH = /react|angular|next\.?js|node\.?js|typescript/i;
+const INCLUDE_TECH = /react|angular|next\.?js|node\.?js|typescript|frontend|front[- ]end|fullstack|full[- ]stack/i;
 const INCLUDE_ROLE = /frontend|front[- ]end|fullstack|full[- ]stack/i;
 const INCLUDE_CONTRACT = /contract|contractor|freelance|part[- ]?time/i;
 const INCLUDE_REMOTE = /\bremote\b/i;
