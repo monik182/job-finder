@@ -1,0 +1,41 @@
+name: Daily Job Search
+
+on:
+  schedule:
+    - cron: '2 6 * * *'   # 6:02 AM UTC daily (7:02 AM CET / 8:02 AM CEST)
+  workflow_dispatch:        # Allow manual trigger from Actions UI
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # Required to commit seen-jobs.json back to the repo
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run job search
+        env:
+          BROWSERLESS_API_KEY: ${{ secrets.BROWSERLESS_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          MY_EMAIL: ${{ secrets.MY_EMAIL }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+        run: npm start
+
+      - name: Commit updated seen-jobs.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen-jobs.json
+          git diff --staged --quiet || git commit -m "chore: update seen-jobs.json [skip ci]"
+          git push
