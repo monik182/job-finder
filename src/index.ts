@@ -7,11 +7,13 @@ import { scrapeLinkedIn } from './scrapers/linkedin.js';
 import { filterJobs, saveExcludedJobs } from './filters/filter-jobs.js';
 import { loadSeenJobs, saveSeenJobs, deduplicateJobs } from './dedup/dedup.js';
 import { sendEmail } from './email/send-email.js';
-import { type EmailReport, type FilteredJob, type JobSource } from './types.js';
+import { buildRunLog, appendRunLog } from './logger.js';
+import { type EmailReport, type FilteredJob, type JobSource, type ScrapeResult } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SEEN_JOBS_PATH = resolve(__dirname, '..', 'seen-jobs.json');
 const EXCLUDED_JOBS_PATH = resolve(__dirname, '..', 'excluded-jobs.json');
+const RUNS_LOG_PATH = resolve(__dirname, '..', 'runs.log');
 
 function validateEnv(): void {
   const required = ['BROWSERLESS_API_KEY', 'RESEND_API_KEY', 'MY_EMAIL', 'FROM_EMAIL'];
@@ -33,6 +35,7 @@ async function main(): Promise<void> {
   console.log('=== Job Finder starting ===');
   validateEnv();
 
+  const startedAt = new Date().toISOString();
   const browser = await getBrowser();
   console.log('[main] Connected to Browserless');
 
@@ -40,16 +43,16 @@ async function main(): Promise<void> {
 
   try {
     // Scrape in order: safest first, riskiest (LinkedIn) last
-    const results = [];
+    const results: ScrapeResult[] = [];
 
     console.log('\n[main] Scraping Anywhere Remote Jobs...');
-    results.push(await scrapeAnywhereRemote(browser));
+    // try { results.push(await scrapeAnywhereRemote(browser)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
 
     console.log('\n[main] Scraping Work at a Startup (YC)...');
-    // results.push(await scrapeYCombinator(browser));
+    try { results.push(await scrapeYCombinator(browser)); } catch (e) { console.error('[main] YCombinator failed:', e); }
 
     console.log('\n[main] Scraping LinkedIn...');
-    // results.push(await scrapeLinkedIn(browser));
+    // try { results.push(await scrapeLinkedIn(browser)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
 
     const allRawJobs = results.flatMap((r) => r.jobs);
     results.forEach((r) => allErrors.push(...r.errors));
@@ -91,9 +94,6 @@ async function main(): Promise<void> {
       scraperErrors: allErrors,
     };
 
-    // Send email
-    await sendEmail(report);
-
     // Persist updated seen-jobs.json
     saveSeenJobs(SEEN_JOBS_PATH, updatedStore);
     console.log(`[main] Updated seen-jobs.json (total hashes: ${updatedStore.hashes.length})`);
@@ -102,6 +102,32 @@ async function main(): Promise<void> {
     if (process.env['NODE_ENV'] === 'development') {
       saveExcludedJobs(EXCLUDED_JOBS_PATH, excludedJobs);
       console.log(`[main] Updated excluded-jobs.json (+${excludedJobs.length} exclusions)`);
+    }
+
+    // Send email only if there are new jobs
+    if (newJobs.length === 0) {
+      console.log('[main] No new jobs found — skipping email');
+    } else {
+      await sendEmail(report);
+    }
+
+    // Append run log (production only)
+    // if (process.env['NODE_ENV'] !== 'development') {
+    if (true) {
+      const entry = buildRunLog({
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        seenJobsTotal: updatedStore.hashes.length,
+        rawJobsFound: allRawJobs.length,
+        newJobsFound: newJobs.length,
+        excludedJobs,
+        results,
+        globalErrors: allErrors.filter(
+          (e) => !results.some((r) => r.errors.includes(e)),
+        ),
+      });
+      appendRunLog(RUNS_LOG_PATH, entry);
+      console.log('[main] Run logged to runs.log');
     }
 
     console.log('\n=== Job Finder complete ===');

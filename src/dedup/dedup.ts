@@ -54,7 +54,7 @@ export function deduplicateJobs(
   }
 
   const updatedStore: SeenJobsStore = {
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: newHashes.length > 0 ? new Date().toISOString() : store.lastUpdated,
     hashes: [...store.hashes, ...newHashes],
   };
 

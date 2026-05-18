@@ -3,16 +3,49 @@ import { type RawJob, type ScrapeResult } from '../types.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 
 const SOURCE = 'ycombinator' as const;
-const BASE_URL = 'https://www.workatastartup.com';
-const QUERIES = ['React', 'Angular', 'Next.js', 'Node.js', 'frontend', 'fullstack'];
+const LOGIN_URL =
+  'https://account.ycombinator.com/?continue=https%3A%2F%2Fwww.workatastartup.com%2F';
+const BASE_COMPANIES_URL =
+  'https://www.workatastartup.com/companies?demographic=any&hasEquity=any&hasSalary=any&industry=any&interviewProcess=any&jobType=any&layout=list-compact&remote=only&role=eng&sortBy=created_desc&tab=any&usVisaNotRequired=true';
+const JOBS_PER_COMBINATION = 10; // 2 pages of 10 each via infinite scroll
+
+const QUERIES = [
+  { param: 'role_type', value: 'fe' },
+  // { param: 'role_type', value: 'fs' },
+  // { param: 'query', value: 'react' },
+  // { param: 'query', value: 'angular' },
+  // { param: 'query', value: 'nextjs' },
+  // { param: 'query', value: 'typescript' },
+];
+
+function randomInt(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// Selectors — update here if the site changes
+const SEL = {
+  // Login page
+  emailInput: 'input#ycid-input',
+  passwordInput: 'input#password-input',
+  submitButton: 'div.actions button[type="submit"]',
+  submitButtonFallback: 'button[type="submit"]',
+  // Companies listing page
+  directoryList: 'div.directory-list',
+  companyCards: 'div.directory-list > div',
+  // Per-card, scoped to each company card
+  companyName: 'div:first-child div:last-child div:first-child div:last-child div:first-child a span:first-child',
+  jobItems: 'div:nth-child(2) div:first-child > div div',
+  // Per-job-item, scoped to each job item
+  jobTitle: 'div:first-child div:first-child a',
+  jobTags: 'div:first-child div:last-child',
+  jobLink: 'div:nth-child(2) a',
+} as const;
 
 interface RawJobData {
   title: string;
   company: string;
-  location: string;
-  dateText: string;
+  tags: string;
   url: string;
-  description: string;
 }
 
 export async function scrapeYCombinator(browser: Browser): Promise<ScrapeResult> {
@@ -21,87 +54,136 @@ export async function scrapeYCombinator(browser: Browser): Promise<ScrapeResult>
   const seenUrls = new Set<string>();
   const scrapedAt = new Date().toISOString();
 
-  for (const query of QUERIES) {
-    const url = `${BASE_URL}/jobs?remote=true&query=${encodeURIComponent(query)}`;
-    const page = await newPage(browser);
+  const email = process.env.YC_EMAIL;
+  const password = process.env.YC_PASSWORD;
+  if (!email || !password) {
+    return {
+      source: SOURCE,
+      jobs,
+      errors: ['[ycombinator] YC_EMAIL or YC_PASSWORD not set in environment'],
+    };
+  }
+
+  const page = await newPage(browser);
+
+  // --- Login ---
+  try {
+    const loginOk = await safeGoto(page, LOGIN_URL, 30_000);
+    if (!loginOk) {
+      errors.push('[ycombinator] Failed to load login page');
+      await page.close();
+      return { source: SOURCE, jobs, errors };
+    }
+
+    await page.waitForSelector(SEL.emailInput, { timeout: 15_000 });
+
+    // Human-like pause before starting to type
+    await delay(randomInt(800, 1500), randomInt(800, 1500));
+
+    await page.click(SEL.emailInput);
+    await page.type(SEL.emailInput, email, { delay: randomInt(80, 150) });
+
+    await delay(randomInt(600, 1200), randomInt(600, 1200));
+
+    await page.click(SEL.passwordInput);
+    await page.type(SEL.passwordInput, password, { delay: randomInt(80, 150) });
+
+    await delay(randomInt(500, 900), randomInt(500, 900));
+
+    // Click submit — prefer the scoped selector, fall back to generic
+    const submitSelector = await page.$(SEL.submitButton)
+      ? SEL.submitButton
+      : SEL.submitButtonFallback;
+    await page.click(submitSelector);
+
+    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+
+    const currentUrl = page.url();
+    if (!currentUrl.includes('workatastartup.com')) {
+      errors.push(`[ycombinator] Login may have failed — landed on: ${currentUrl}`);
+      await page.close();
+      return { source: SOURCE, jobs, errors };
+    }
+
+    console.log('[ycombinator] Login successful');
+    await delay(randomInt(2000, 3500), randomInt(2000, 3500));
+  } catch (err) {
+    const msg = `[ycombinator] Login error: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(msg);
+    errors.push(msg);
+    await page.close();
+    return { source: SOURCE, jobs, errors };
+  }
+
+  // --- Scrape each query combination ---
+  for (const { param, value } of QUERIES) {
+    const url = `${BASE_COMPANIES_URL}&${param}=${encodeURIComponent(value)}`;
 
     try {
-      const ok = await safeGoto(page, url, 30_000);
-      if (!ok) {
-        errors.push(`[ycombinator] Failed to load: ${url}`);
-        await page.close();
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      } catch (err) {
+        errors.push(`[ycombinator] Failed to load: ${url} — ${err instanceof Error ? err.message : String(err)}`);
         await delay();
         continue;
       }
 
-      // Wait for React SPA to render jobs
+      // React needs time to hydrate after domcontentloaded — wait for the list
       try {
-        await page.waitForSelector('.jobs-list, [data-testid="job-list"], .job-row, .company-jobs-table', {
-          timeout: 15_000,
-        });
+        await page.waitForSelector(SEL.directoryList, { timeout: 30_000 });
       } catch {
-        // Selector may vary; attempt to proceed anyway
+        console.warn(`[ycombinator] "${param}=${value}": directory-list not found`);
+        await delay();
+        continue;
       }
 
-      // Scroll to trigger lazy loading
-      for (let i = 0; i < 3; i++) {
-        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await delay(1000, 1500);
-      }
-
-      const rawJobs = await page.evaluate((baseUrl: string): RawJobData[] => {
-        const results: RawJobData[] = [];
-
-        // YC job rows can be in a table or div layout
-        const jobEls = document.querySelectorAll(
-          '.job-row, tr.job, .job-listing, [class*="job-"] a[href*="/jobs/"]',
+      // Scroll to load enough jobs (infinite scroll, ~10 per scroll)
+      let prevCount = 0;
+      for (let i = 0; i < 5; i++) {
+        const count: number = await page.evaluate(
+          (cardsSel: string) => document.querySelectorAll(cardsSel).length,
+          SEL.companyCards,
         );
+        if (count >= JOBS_PER_COMBINATION) break;
+        if (i > 0 && count === prevCount) break; // no new content loaded
+        prevCount = count;
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        await delay(randomInt(1500, 2500), randomInt(1500, 2500));
+      }
 
-        // Fallback: find all links that point to job detail pages
-        const jobLinks = Array.from(
-          document.querySelectorAll('a[href*="/jobs/"]'),
-        ) as HTMLAnchorElement[];
+      const rawJobs = await page.evaluate(
+        (selectors: typeof SEL, baseUrl: string, maxJobs: number): RawJobData[] => {
+          const results: RawJobData[] = [];
+          const companyCards = Array.from(document.querySelectorAll(selectors.companyCards));
 
-        const processedHrefs = new Set<string>();
+          for (const card of companyCards) {
+            if (results.length >= maxJobs) break;
 
-        // Try structured selectors first
-        jobEls.forEach((el) => {
-          const anchor = el.querySelector('a[href*="/jobs/"]') as HTMLAnchorElement | null;
-          const url = anchor ? (anchor.href.startsWith('http') ? anchor.href : baseUrl + anchor.getAttribute('href')) : '';
-          if (!url || processedHrefs.has(url)) return;
-          processedHrefs.add(url);
+            const company = card.querySelector(selectors.companyName)?.textContent?.trim() ?? '';
 
-          const title = el.querySelector('.title, .job-title, h3, h2, strong')?.textContent?.trim()
-            ?? anchor?.textContent?.trim()
-            ?? '';
-          const company = el.querySelector('.company-name, .company, td:first-child')?.textContent?.trim() ?? '';
-          const location = el.querySelector('.location, .remote')?.textContent?.trim() ?? '';
-          const dateText = el.querySelector('time, .date, .posted')?.textContent?.trim() ?? '';
-          const description = el.querySelector('.description, p')?.textContent?.trim().slice(0, 300) ?? '';
+            const jobItems = Array.from(card.querySelectorAll(selectors.jobItems));
 
-          if (title) results.push({ title, company, location, dateText, url, description });
-        });
+            for (const jobItem of jobItems) {
+              if (results.length >= maxJobs) break;
 
-        // Fallback: collect remaining job links not already processed
-        jobLinks.forEach((anchor) => {
-          const href = anchor.getAttribute('href') ?? '';
-          if (!href.match(/\/jobs\/\d+/)) return;
-          const url = anchor.href.startsWith('http') ? anchor.href : baseUrl + href;
-          if (processedHrefs.has(url)) return;
-          processedHrefs.add(url);
+              const title = jobItem.querySelector(selectors.jobTitle)?.textContent?.trim() ?? '';
+              const tags = jobItem.querySelector(selectors.jobTags)?.textContent?.trim() ?? '';
 
-          const row = anchor.closest('tr, .job-row, li, [class*="job"]');
-          const title = anchor.textContent?.trim() ?? '';
-          const company = row?.querySelector('.company-name, td:first-child')?.textContent?.trim() ?? '';
-          const location = row?.querySelector('.location')?.textContent?.trim() ?? '';
-          const dateText = row?.querySelector('time')?.textContent?.trim() ?? '';
-          const description = '';
+              const anchor = jobItem.querySelector(selectors.jobLink) as HTMLAnchorElement | null;
+              if (!anchor) continue;
+              const href = anchor.getAttribute('href') ?? '';
+              const url = href.startsWith('http') ? href : baseUrl + href;
 
-          if (title) results.push({ title, company, location, dateText, url, description });
-        });
+              if (title) results.push({ title, company, tags, url });
+            }
+          }
 
-        return results;
-      }, BASE_URL);
+          return results;
+        },
+        SEL,
+        'https://www.workatastartup.com',
+        JOBS_PER_COMBINATION,
+      );
 
       for (const raw of rawJobs) {
         if (seenUrls.has(raw.url)) continue;
@@ -110,27 +192,26 @@ export async function scrapeYCombinator(browser: Browser): Promise<ScrapeResult>
         jobs.push({
           title: raw.title,
           company: raw.company,
-          location: raw.location,
-          datePosted: parseRelativeDate(raw.dateText),
+          location: raw.tags,
+          datePosted: parseRelativeDate(null),
           url: raw.url,
-          description: raw.description,
+          description: raw.tags,
           source: SOURCE,
           scrapedAt,
         });
       }
 
-      console.log(`[ycombinator] "${query}": ${rawJobs.length} listings`);
+      console.log(`[ycombinator] "${param}=${value}": ${rawJobs.length} listings`);
     } catch (err) {
-      const msg = `[ycombinator] Error scraping "${query}": ${err instanceof Error ? err.message : String(err)}`;
+      const msg = `[ycombinator] Error scraping "${param}=${value}": ${err instanceof Error ? err.message : String(err)}`;
       console.error(msg);
       errors.push(msg);
-    } finally {
-      await page.close();
     }
 
-    await delay();
+    await delay(randomInt(2000, 4000), randomInt(2000, 4000));
   }
 
+  await page.close();
   console.log(`[ycombinator] Total: ${jobs.length} jobs (${seenUrls.size} unique)`);
   return { source: SOURCE, jobs, errors };
 }
