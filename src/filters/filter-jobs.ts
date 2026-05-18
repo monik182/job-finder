@@ -31,6 +31,10 @@ const EXCLUDE_INTERN =
   /\b(intern|internship|junior|jr\.?|entry[- ]level)\b/i;
 const EXCLUDE_ON_SITE =
   /\b(on[- ]?site|hybrid|in[- ]office|in[- ]person|must\s+relocate)\b/i;
+const EXCLUDE_INDIA =
+  /\b(india|indian\s+market|india[- ]based|bangalore|bengaluru|mumbai|delhi|hyderabad|chennai|pune|kolkata|noida|gurugram|gurgaon)\b|\(IN\)|₹/i;
+const EXCLUDE_UAE =
+  /\b(UAE|united\s+arab\s+emirates|dubai|abu\s+dhabi|sharjah|ajman|ras\s+al[- ]khaimah|fujairah|umm\s+al[- ]quwain|gulf|GCC|saudi\s+arabia|riyadh|jeddah|qatar|doha|kuwait|bahrain|oman|muscat)\b/i;
 
 // ─── Required inclusion patterns ──────────────────────────────────────────
 
@@ -126,6 +130,8 @@ export function filterJobs(jobs: RawJob[]): FilterResult {
     if (EXCLUDE_C_LEVEL.test(job.title)) exclusionReasons.push('c-level-title');
     if (EXCLUDE_INTERN.test(job.title)) exclusionReasons.push('intern-or-junior');
     if (EXCLUDE_ON_SITE.test(combined)) exclusionReasons.push('on-site-or-hybrid');
+    if (EXCLUDE_INDIA.test(`${job.location} ${combined}`)) exclusionReasons.push('india-market');
+    if (EXCLUDE_UAE.test(`${job.location} ${combined}`)) exclusionReasons.push('uae-gulf-market');
 
     // ── Pass 2: Required inclusions ────────────────────────────────────────
     if (!INCLUDE_TECH.test(combined)) exclusionReasons.push('no-tech-match');
