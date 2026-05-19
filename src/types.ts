@@ -26,6 +26,7 @@ export interface ExcludedJob {
   company: string;
   url: string;
   source: JobSource;
+  datePosted: string;
   excludedAt: string;
   reasons: string[];
 }

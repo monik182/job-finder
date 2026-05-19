@@ -150,6 +150,7 @@ export function filterJobs(jobs: RawJob[]): FilterResult {
         company: job.company,
         url: job.url,
         source: job.source,
+        datePosted: job.datePosted || 'unknown',
         excludedAt,
         reasons: exclusionReasons,
       });
