@@ -1,11 +1,11 @@
 {
   "scraping": {
-    "maxPages": 1,
-    "maxJobs": 10,
+    "maxPages": 2,
+    "maxJobs": 30,
     "maxAgeDays": 7
   },
   "filters": {
-    "geoLocations": ["worldwide"],
+    "geoLocations": ["worldwide", "europe"],
     "skills": ["react"],
     "jobTitle": ["frontend", "front-end", "fullstack", "full-stack", "web developer"],
     "excludedCompanies": ["micro1"],
@@ -15,7 +15,7 @@
     "excludeSoutheastAsia": true,
     "excludeSkills": [".net", "java", "c#", "php"],
     "excludeClearance": true,
-    "experience": ["junior"],
+    "experience": ["senior"],
     "excludeOnSite": true,
     "excludeHybrid": true,
     "remote": true,
