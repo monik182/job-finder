@@ -123,8 +123,7 @@ async function main(): Promise<void> {
     }
 
     // Append run log (production only)
-    // if (process.env['NODE_ENV'] !== 'development') {
-    if (true) {
+    if (process.env['NODE_ENV'] !== 'development') {
       const entry = buildRunLog({
         startedAt,
         finishedAt: new Date().toISOString(),

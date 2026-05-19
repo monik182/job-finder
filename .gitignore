@@ -3,4 +3,4 @@ dist/
 .env
 *.js.map
 excluded-jobs.json
-
+raw-jobs.json
