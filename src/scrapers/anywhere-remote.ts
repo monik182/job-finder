@@ -1,6 +1,6 @@
 import { type Browser, type Page } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
-import { type AppConfig, type ExperienceLevel } from '../config.js';
+import { type AppConfig, type ExperienceLevel, getSearchTerms } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 
 const SOURCE = 'anywhere-remote' as const;
@@ -191,7 +191,7 @@ export async function scrapeAnywhereRemote(
 
   let firstCombination = true;
   for (const country of countryList) {
-    for (const skill of config.filters.skills) {
+    for (const skill of getSearchTerms(config)) {
       for (const exp of config.filters.experience) {
         if (!firstCombination) await delay(minWait, minWait + 3000);
         firstCombination = false;

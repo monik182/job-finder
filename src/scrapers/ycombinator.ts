@@ -1,6 +1,6 @@
 import { type Browser } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
-import { type AppConfig } from '../config.js';
+import { type AppConfig, getSearchTerms } from '../config.js';
 import { newPage, delay, safeGoto } from './utils.js';
 
 const SOURCE = 'ycombinator' as const;
@@ -19,20 +19,7 @@ function buildBaseUrl(config: AppConfig): string {
 }
 
 function buildQueries(config: AppConfig): Array<{ param: string; value: string }> {
-  const queries: Array<{ param: string; value: string }> = [];
-  const addedValues = new Set<string>();
-
-  // Add skill queries (skip role words already covered by role_type)
-  const roleWords = new Set(config.filters.jobTitle.map((t) => t.toLowerCase()));
-  for (const skill of config.filters.skills) {
-    const normalized = skill.toLowerCase();
-    if (roleWords.has(normalized)) continue;
-    if (addedValues.has(normalized)) continue;
-    queries.push({ param: 'query', value: skill });
-    addedValues.add(normalized);
-  }
-
-  return queries;
+  return getSearchTerms(config).map((term) => ({ param: 'query', value: term }));
 }
 
 function randomInt(min: number, max: number): number {

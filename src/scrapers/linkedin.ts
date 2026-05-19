@@ -1,6 +1,6 @@
 import { type Browser, type Page } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
-import { type AppConfig, type GeoLocation, type ExperienceLevel, type ContractType } from '../config.js';
+import { type AppConfig, type GeoLocation, type ExperienceLevel, type ContractType, getSearchTerms } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 
 const SOURCE = 'linkedin' as const;
@@ -234,7 +234,7 @@ export async function scrapeLinkedIn(
   const minWait = config.scraping.minDelayMs;
 
   for (const geo of geoIds) {
-    for (const keyword of config.filters.skills) {
+    for (const keyword of getSearchTerms(config)) {
       for (const exp of config.filters.experience) {
         const fixedParams = buildLinkedInParamsForExp(config, exp);
         const searchUrl = buildUrl(keyword, geo.id, fixedParams);

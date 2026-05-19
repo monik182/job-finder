@@ -55,6 +55,20 @@ export interface AppConfig {
   filters: FiltersConfig;
 }
 
+/** Returns deduplicated skills + jobTitle — the full set of search query terms. */
+export function getSearchTerms(config: AppConfig): string[] {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const t of [...config.filters.skills, ...config.filters.jobTitle]) {
+    const lower = t.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      terms.push(t);
+    }
+  }
+  return terms;
+}
+
 export function loadConfig(): AppConfig {
   let raw: unknown;
   try {

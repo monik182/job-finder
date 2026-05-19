@@ -1,6 +1,6 @@
 import { type Browser } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
-import { type AppConfig, type ExperienceLevel, type ContractType, type GeoLocation } from '../config.js';
+import { type AppConfig, type ExperienceLevel, type ContractType, type GeoLocation, getSearchTerms } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 
 const SOURCE = 'working-nomads' as const;
@@ -107,7 +107,7 @@ export async function scrapeWorkingNomads(
 
   const maxPages = config.scraping.maxPages;
 
-  for (const skill of config.filters.skills) {
+  for (const skill of getSearchTerms(config)) {
     const url = buildJobsUrl(config, skill);
     console.log(`[working-nomads] Searching: ${url}`);
     const page = await newPage(browser);
@@ -211,7 +211,7 @@ export async function scrapeWorkingNomads(
       await page.close();
     }
 
-    if (config.filters.skills.indexOf(skill) < config.filters.skills.length - 1) {
+    if (getSearchTerms(config).indexOf(skill) < getSearchTerms(config).length - 1) {
       await delay(5000, 9000);
     }
   }
