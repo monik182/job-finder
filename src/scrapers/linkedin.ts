@@ -27,6 +27,7 @@ const GEO_ID_MAP: Record<GeoLocation, { id: string; label: string }> = {
   latam: { id: '91000011', label: 'Latin America' },
   usa: { id: '103644278', label: 'United States' },
   europe: { id: '91000000', label: 'European Union' },
+  worldwide: { id: '92000000', label: 'Worldwide' },
 };
 
 // Selectors — update here if the site changes

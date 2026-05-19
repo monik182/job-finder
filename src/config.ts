@@ -5,8 +5,9 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = resolve(__dirname, '..', 'config.json');
 
-export type GeoLocation = 'latam' | 'usa' | 'europe';
+export type GeoLocation = 'latam' | 'usa' | 'europe' | 'worldwide';
 export type ContractType = 'full-time' | 'part-time' | 'contract' | 'freelance' | 'temporary';
+export type ExperienceLevel = 'junior' | 'mid' | 'senior' | 'lead' | 'staff' | 'principal' | 'director' | 'c-level';
 
 export interface ScrapingConfig {
   maxPages: number;
@@ -25,12 +26,13 @@ export interface FiltersConfig {
   skills: string[];
   jobTitle: string[];
   excludedCompanies: string[];
+  excludeSkills: string[];
   excludeUsOnly: boolean;
   excludeIndia: boolean;
   excludeUae: boolean;
+  excludeSoutheastAsia: boolean;
+  experience: ExperienceLevel[];
   excludeClearance: boolean;
-  excludeCLevel: boolean;
-  excludeInternOrJunior: boolean;
   excludeOnSite: boolean;
   excludeHybrid: boolean;
   remote: boolean;

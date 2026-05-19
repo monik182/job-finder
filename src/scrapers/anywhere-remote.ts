@@ -6,12 +6,23 @@ import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 const SOURCE = 'anywhere-remote' as const;
 const BASE_URL = 'https://anywhereremotejobs.com';
 
+const ANYWHERE_REMOTE_GEO_MAP: Partial<Record<import('../config.js').GeoLocation, string>> = {
+  latam: 'LATAM',
+  usa: 'United States',
+  europe: 'European Union',
+  worldwide: 'Worldwide',
+};
+
 function buildJobsUrl(config: AppConfig): string {
   const params = new URLSearchParams();
 
-  // country%5B%5D=European+Union&country%5B%5D=LATAM&country%5B%5D=United+States
-  const country = config.filters.geoLocations.includes('usa') ? 'United States' : 'Worldwide';
-  params.append('country[0]', country);
+  const countries = config.filters.geoLocations
+    .map((loc) => ANYWHERE_REMOTE_GEO_MAP[loc])
+    .filter((c): c is string => c !== undefined);
+
+  const countryList = countries.length > 0 ? countries : ['Worldwide'];
+  countryList.forEach((c, i) => params.append(`country[${i}]`, c));
+
   params.append('hide_reposts', '1');
 
   config.filters.skills.forEach((skill, i) => {

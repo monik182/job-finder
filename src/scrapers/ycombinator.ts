@@ -7,24 +7,20 @@ const SOURCE = 'ycombinator' as const;
 const LOGIN_URL =
   'https://account.ycombinator.com/?continue=https%3A%2F%2Fwww.workatastartup.com%2F';
 const BASE_COMPANIES_URL =
-  'https://www.workatastartup.com/companies?demographic=any&hasEquity=any&hasSalary=any&industry=any&interviewProcess=any&jobType=any&layout=list-compact&remote=only&role=eng&sortBy=created_desc&tab=any&usVisaNotRequired=true';
+  'https://www.workatastartup.com/companies?demographic=any&hasEquity=any&hasSalary=any&industry=any&interviewProcess=any&jobType=any&layout=list-compact&sortBy=created_desc&tab=any&usVisaNotRequired=true';
+
+function buildBaseUrl(config: AppConfig): string {
+  const params = new URLSearchParams(BASE_COMPANIES_URL.split('?')[1]);
+  if (config.filters.remote) {
+    params.set('remote', 'only');
+    params.set('remote', 'yes');
+  };
+  return `https://www.workatastartup.com/companies?${params.toString()}`;
+}
 
 function buildQueries(config: AppConfig): Array<{ param: string; value: string }> {
   const queries: Array<{ param: string; value: string }> = [];
   const addedValues = new Set<string>();
-
-  // // Map jobTitle entries to YC role_type values
-  // const hasFrontend = config.filters.jobTitle.some((t) => /^front[- ]?end$/i.test(t));
-  // const hasFullstack = config.filters.jobTitle.some((t) => /^full[- ]?stack$/i.test(t));
-
-  // if (hasFrontend) {
-  //   queries.push({ param: 'role_type', value: 'fe' });
-  //   addedValues.add('fe');
-  // }
-  // if (hasFullstack) {
-  //   queries.push({ param: 'role_type', value: 'fs' });
-  //   addedValues.add('fs');
-  // }
 
   // Add skill queries (skip role words already covered by role_type)
   const roleWords = new Set(config.filters.jobTitle.map((t) => t.toLowerCase()));
@@ -142,10 +138,11 @@ export async function scrapeYCombinator(
 
   const queries = buildQueries(config);
   const jobsPerCombination = config.scraping.maxJobs;
+  const baseUrl = buildBaseUrl(config);
 
   // --- Scrape each query combination ---
   for (const { param, value } of queries) {
-    const url = `${BASE_COMPANIES_URL}&${param}=${encodeURIComponent(value)}`;
+    const url = `${baseUrl}&${param}=${encodeURIComponent(value)}`;
 
     try {
       try {
