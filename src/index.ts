@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     };
 
     console.log('\n[main] Scraping LinkedIn...');
-    // try { results.push(await scrapeLinkedIn(browser, config, checkpoint)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
+    try { results.push(await scrapeLinkedIn(browser, config, checkpoint)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
 
     console.log('\n[main] Scraping Anywhere Remote Jobs...');
     try { results.push(await scrapeAnywhereRemote(browser, config, checkpoint)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
@@ -142,8 +142,8 @@ async function main(): Promise<void> {
       console.log(`[main] Updated excluded-jobs.json (+${allExcluded.length} exclusions, ${aiExcludedForLog.length} from AI filter)`);
     }
 
-    // Send email only if there are new jobs
-    if (newJobs.length === 0) {
+    // Send email only if there are jobs to show (after AI filtering)
+    if (strongJobs.length === 0 && weakJobs.length === 0) {
       console.log('[main] No new jobs found — skipping email');
     } else {
       await sendEmail(report);
