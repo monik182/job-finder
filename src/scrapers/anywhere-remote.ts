@@ -1,4 +1,4 @@
-import { type Browser } from 'puppeteer-core';
+import { type Browser, type Page } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
 import { type AppConfig, type ExperienceLevel } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
@@ -56,6 +56,123 @@ interface RawJobData {
   tags: string;
 }
 
+async function scrapeOneCombination(
+  page: Page,
+  country: string,
+  skill: string,
+  exp: ExperienceLevel,
+  config: AppConfig,
+  seenUrls: Set<string>,
+  scrapedAt: string,
+  errors: string[],
+  onProgress?: (newJobs: RawJob[]) => void,
+): Promise<RawJob[]> {
+  const jobs: RawJob[] = [];
+  const maxPages = config.scraping.maxPages;
+  const minWait = config.scraping.minDelayMs;
+  const expValue = ANYWHERE_REMOTE_EXPERIENCE_MAP[exp];
+
+  let currentUrl: string | null = buildJobsUrl(country, skill, expValue);
+  console.log(`[anywhere-remote] Scraping "${skill}" / ${exp} in ${country}: ${currentUrl}`);
+  let pageNum = 1;
+
+  while (currentUrl && pageNum <= maxPages) {
+    const ok = await safeGoto(page, currentUrl);
+    if (!ok) {
+      errors.push(`[anywhere-remote] Failed to load page ${pageNum}: ${currentUrl}`);
+      break;
+    }
+
+    try {
+      await page.waitForSelector(SEL.jobsContainer, { timeout: 15_000 });
+    } catch {
+      errors.push(`[anywhere-remote] Job container not found on page ${pageNum}`);
+      break;
+    }
+
+    try {
+      const rawJobs = await page.evaluate(
+        (selectors: typeof SEL, baseUrl: string): RawJobData[] => {
+          const results: RawJobData[] = [];
+          const articles = document.querySelectorAll(selectors.jobArticle);
+
+          articles.forEach((article) => {
+            const linkEl = article.querySelector(selectors.articleLink);
+            const dateEl = article.querySelector(selectors.articleDate);
+            const companyEl = article.querySelector(selectors.articleCompany);
+            const titleEl = article.querySelector(selectors.articleTitle);
+            const tagEls = article.querySelectorAll(selectors.articleTagItems);
+
+            const relativeUrl =
+              linkEl instanceof HTMLAnchorElement ? linkEl.getAttribute('href') ?? '' : '';
+            const url = relativeUrl.startsWith('http')
+              ? relativeUrl
+              : `${baseUrl}${relativeUrl}`;
+
+            const title = titleEl?.textContent?.trim() ?? '';
+            const company = companyEl?.textContent?.trim() ?? '';
+            const dateText = dateEl?.textContent?.trim() ?? '';
+            const tags = Array.from(tagEls)
+              .map((t) => t.textContent?.trim() ?? '')
+              .filter(Boolean)
+              .join(', ');
+
+            if (title && url) {
+              results.push({ title, company, dateText, url, tags });
+            }
+          });
+
+          return results;
+        },
+        SEL,
+        BASE_URL,
+      );
+
+      const batchJobs: RawJob[] = [];
+      for (const raw of rawJobs) {
+        if (seenUrls.has(raw.url)) continue;
+        seenUrls.add(raw.url);
+
+        const job: RawJob = {
+          title: raw.title,
+          company: raw.company,
+          location: 'Remote',
+          datePosted: parseRelativeDate(raw.dateText),
+          url: raw.url,
+          description: raw.tags,
+          source: SOURCE,
+          scrapedAt,
+        };
+        jobs.push(job);
+        batchJobs.push(job);
+      }
+
+      if (batchJobs.length > 0) onProgress?.(batchJobs);
+      console.log(`[anywhere-remote] Page ${pageNum}: ${rawJobs.length} listings`);
+
+      const nextUrl = await page.evaluate((nextSel: string, baseUrl: string): string | null => {
+        const nextBtn = document.querySelector(nextSel);
+        if (!(nextBtn instanceof HTMLAnchorElement)) return null;
+        const href = nextBtn.getAttribute('href') ?? '';
+        if (!href) return null;
+        return href.startsWith('http') ? href : `${baseUrl}${href}`;
+      }, SEL.nextPage, BASE_URL);
+
+      currentUrl = nextUrl;
+      pageNum++;
+    } catch (err) {
+      const msg = `[anywhere-remote] Error on page ${pageNum}: ${err instanceof Error ? err.message : String(err)}`;
+      console.error(msg);
+      errors.push(msg);
+      break;
+    }
+
+    if (currentUrl) await delay(minWait, minWait + 3000);
+  }
+
+  return jobs;
+}
+
 export async function scrapeAnywhereRemote(
   browser: Browser,
   config: AppConfig,
@@ -65,15 +182,12 @@ export async function scrapeAnywhereRemote(
   const errors: string[] = [];
   const seenUrls = new Set<string>();
   const scrapedAt = new Date().toISOString();
-
-  const maxPages = config.scraping.maxPages;
+  const minWait = config.scraping.minDelayMs;
 
   const locations = config.filters.geoLocations
     .map((loc) => ANYWHERE_REMOTE_GEO_MAP[loc])
     .filter((c): c is string => c !== undefined);
   const countryList = locations.length > 0 ? locations : ['Worldwide'];
-
-  const minWait = config.scraping.minDelayMs;
 
   let firstCombination = true;
   for (const country of countryList) {
@@ -82,111 +196,15 @@ export async function scrapeAnywhereRemote(
         if (!firstCombination) await delay(minWait, minWait + 3000);
         firstCombination = false;
 
-        const expValue = ANYWHERE_REMOTE_EXPERIENCE_MAP[exp];
-        let currentUrl: string | null = buildJobsUrl(country, skill, expValue);
-        console.log(`[anywhere-remote] Scraping "${skill}" / ${exp} in ${country}: ${currentUrl}`);
-        let pageNum = 1;
-
-        while (currentUrl && pageNum <= maxPages) {
-          const page = await newPage(browser);
-
-          try {
-            const ok = await safeGoto(page, currentUrl);
-            if (!ok) {
-              errors.push(`[anywhere-remote] Failed to load page ${pageNum}: ${currentUrl}`);
-              await page.close();
-              break;
-            }
-
-            // Wait for job container
-            try {
-              await page.waitForSelector(SEL.jobsContainer, { timeout: 15_000 });
-            } catch {
-              errors.push(`[anywhere-remote] Job container not found on page ${pageNum}`);
-              await page.close();
-              break;
-            }
-
-            const rawJobs = await page.evaluate(
-              (selectors: typeof SEL, baseUrl: string): RawJobData[] => {
-                const results: RawJobData[] = [];
-                const articles = document.querySelectorAll(selectors.jobArticle);
-
-                articles.forEach((article) => {
-                  const linkEl = article.querySelector(selectors.articleLink);
-                  const dateEl = article.querySelector(selectors.articleDate);
-                  const companyEl = article.querySelector(selectors.articleCompany);
-                  const titleEl = article.querySelector(selectors.articleTitle);
-                  const tagEls = article.querySelectorAll(selectors.articleTagItems);
-
-                  const relativeUrl =
-                    linkEl instanceof HTMLAnchorElement ? linkEl.getAttribute('href') ?? '' : '';
-                  const url = relativeUrl.startsWith('http')
-                    ? relativeUrl
-                    : `${baseUrl}${relativeUrl}`;
-
-                  const title = titleEl?.textContent?.trim() ?? '';
-                  const company = companyEl?.textContent?.trim() ?? '';
-                  const dateText = dateEl?.textContent?.trim() ?? '';
-                  const tags = Array.from(tagEls)
-                    .map((t) => t.textContent?.trim() ?? '')
-                    .filter(Boolean)
-                    .join(', ');
-
-                  if (title && url) {
-                    results.push({ title, company, dateText, url, tags });
-                  }
-                });
-
-                return results;
-              },
-              SEL,
-              BASE_URL,
-            );
-
-            const batchJobs: RawJob[] = [];
-            for (const raw of rawJobs) {
-              if (seenUrls.has(raw.url)) continue;
-              seenUrls.add(raw.url);
-
-              const job: RawJob = {
-                title: raw.title,
-                company: raw.company,
-                location: 'Remote',
-                datePosted: parseRelativeDate(raw.dateText),
-                url: raw.url,
-                description: raw.tags,
-                source: SOURCE,
-                scrapedAt,
-              };
-              jobs.push(job);
-              batchJobs.push(job);
-            }
-
-            if (batchJobs.length > 0) onProgress?.(batchJobs);
-            console.log(`[anywhere-remote] Page ${pageNum}: ${rawJobs.length} listings`);
-
-            // Check for next page
-            const nextUrl = await page.evaluate((nextSel: string, baseUrl: string): string | null => {
-              const nextBtn = document.querySelector(nextSel);
-              if (!(nextBtn instanceof HTMLAnchorElement)) return null;
-              const href = nextBtn.getAttribute('href') ?? '';
-              if (!href) return null;
-              return href.startsWith('http') ? href : `${baseUrl}${href}`;
-            }, SEL.nextPage, BASE_URL);
-
-            currentUrl = nextUrl;
-            pageNum++;
-          } catch (err) {
-            const msg = `[anywhere-remote] Error on page ${pageNum}: ${err instanceof Error ? err.message : String(err)}`;
-            console.error(msg);
-            errors.push(msg);
-            currentUrl = null;
-          } finally {
-            await page.close();
-          }
-
-          if (currentUrl) await delay(minWait, minWait + 3000);
+        // Fresh page per combination — avoids detached frame issues across navigations
+        const page = await newPage(browser);
+        try {
+          const newJobs = await scrapeOneCombination(
+            page, country, skill, exp, config, seenUrls, scrapedAt, errors, onProgress,
+          );
+          jobs.push(...newJobs);
+        } finally {
+          await page.close().catch(() => {});
         }
       }
     }
