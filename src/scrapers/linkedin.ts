@@ -120,81 +120,94 @@ export async function scrapeLinkedIn(
 
   const page = await newPage(browser);
 
-  // ── Login ─────────────────────────────────────────────────────────────────
+  // ── Login (up to 3 attempts) ──────────────────────────────────────────────
 
-  try {
-    const loginOk = await safeGoto(page, LOGIN_URL, 15_000);
-    if (!loginOk) {
-      errors.push('[linkedin] Failed to load login page');
-      await page.close();
-      return { source: SOURCE, jobs, errors };
-    }
+  const MAX_LOGIN_ATTEMPTS = 3;
+  let loginSucceeded = false;
+  let lastLoginError = '';
 
-    await page.waitForSelector(SEL.emailInput, { timeout: 15_000 });
-    await delay(randomInt(800, 1500), randomInt(800, 1500));
-    await moveMouse(page);
+  for (let attempt = 1; attempt <= MAX_LOGIN_ATTEMPTS; attempt++) {
+    try {
+      if (attempt > 1) {
+        console.warn(`[linkedin] Retrying login (attempt ${attempt}/${MAX_LOGIN_ATTEMPTS})…`);
+        await delay(randomInt(2000, 4000), randomInt(2000, 4000));
+      }
 
-    // Email
-    await page.click(SEL.emailInput);
-    await page.type(SEL.emailInput, email, { delay: randomInt(80, 150) });
-    await delay(randomInt(600, 1200), randomInt(600, 1200));
-    await moveMouse(page);
+      const loginLoaded = await safeGoto(page, LOGIN_URL, 15_000);
+      if (!loginLoaded) {
+        lastLoginError = '[linkedin] Failed to load login page';
+        continue;
+      }
 
-    // Password
-    await page.click(SEL.passwordInput);
-    await page.type(SEL.passwordInput, password, { delay: randomInt(80, 150) });
-    await delay(randomInt(500, 900), randomInt(500, 900));
-    await moveMouse(page);
+      await page.waitForSelector(SEL.emailInput, { timeout: 15_000 });
+      await delay(randomInt(800, 1500), randomInt(800, 1500));
+      await moveMouse(page);
 
-    // "Keep me signed in" checkbox
-    await page.evaluate(() => {
-      const labels = document.querySelectorAll('label');
-      for (let i = 0; i < labels.length; i++) {
-        const label = labels[i];
-        if (!label) continue;
-        if (label.textContent?.includes('Keep me logged in')) {
-          const forAttr = label.getAttribute('for');
-          const checkbox = forAttr
-            ? document.getElementById(forAttr)
-            : label.querySelector('input[type="checkbox"]');
-          if (checkbox && 'checked' in checkbox && !(checkbox as HTMLInputElement).checked) {
-            (checkbox as HTMLInputElement).click();
+      // Email
+      await page.click(SEL.emailInput);
+      await page.type(SEL.emailInput, email, { delay: randomInt(80, 150) });
+      await delay(randomInt(600, 1200), randomInt(600, 1200));
+      await moveMouse(page);
+
+      // Password
+      await page.click(SEL.passwordInput);
+      await page.type(SEL.passwordInput, password, { delay: randomInt(80, 150) });
+      await delay(randomInt(500, 900), randomInt(500, 900));
+      await moveMouse(page);
+
+      // "Keep me signed in" checkbox
+      await page.evaluate(() => {
+        const labels = document.querySelectorAll('label');
+        for (let i = 0; i < labels.length; i++) {
+          const label = labels[i];
+          if (!label) continue;
+          if (label.textContent?.includes('Keep me logged in')) {
+            const forAttr = label.getAttribute('for');
+            const checkbox = forAttr
+              ? document.getElementById(forAttr)
+              : label.querySelector('input[type="checkbox"]');
+            if (checkbox && 'checked' in checkbox && !(checkbox as HTMLInputElement).checked) {
+              (checkbox as HTMLInputElement).click();
+            }
+            break;
           }
-          break;
         }
-      }
-    });
-    await delay(randomInt(300, 700), randomInt(300, 700));
-    await moveMouse(page);
+      });
+      await delay(randomInt(300, 700), randomInt(300, 700));
+      await moveMouse(page);
 
-    // "Sign in" button (type="button", text "Sign in")
-    await page.evaluate(() => {
-      const buttons = document.querySelectorAll('button');
-      for (let i = 0; i < buttons.length; i++) {
-        const btn = buttons[i];
-        if (btn?.textContent?.trim().toLowerCase() === 'sign in') {
-          (btn as HTMLButtonElement).click();
-          break;
+      // "Sign in" button (type="button", text "Sign in")
+      await page.evaluate(() => {
+        const buttons = document.querySelectorAll('button');
+        for (let i = 0; i < buttons.length; i++) {
+          const btn = buttons[i];
+          if (btn?.textContent?.trim().toLowerCase() === 'sign in') {
+            (btn as HTMLButtonElement).click();
+            break;
+          }
         }
+      });
+
+      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+
+      if (isAuthWall(page.url())) {
+        lastLoginError = `[linkedin] Login may have failed — landed on: ${page.url()}`;
+        console.error(lastLoginError);
+        continue;
       }
-    });
 
-    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 });
-
-    if (isAuthWall(page.url())) {
-      const msg = `[linkedin] Login may have failed — landed on: ${page.url()}`;
-      console.error(msg);
-      errors.push(msg);
-      await page.close();
-      return { source: SOURCE, jobs, errors };
+      loginSucceeded = true;
+      console.log(`[linkedin] Login successful${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
+      await delay(randomInt(2000, 3500), randomInt(2000, 3500));
+      break;
+    } catch (err) {
+      lastLoginError = `[linkedin] Login error: ${err instanceof Error ? err.message : String(err)}`;
+      console.error(`${lastLoginError}${attempt < MAX_LOGIN_ATTEMPTS ? ' — will retry' : ''}`);
     }
+  }
 
-    console.log('[linkedin] Login successful');
-    await delay(randomInt(2000, 3500), randomInt(2000, 3500));
-  } catch (err) {
-    const msg = `[linkedin] Login error: ${err instanceof Error ? err.message : String(err)}`;
-    console.error(msg);
-    errors.push(msg);
+  if (!loginSucceeded) {
+    errors.push(lastLoginError);
     await page.close();
     return { source: SOURCE, jobs, errors };
   }
