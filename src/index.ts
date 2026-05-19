@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     };
 
     console.log('\n[main] Scraping LinkedIn...');
-    try { results.push(await scrapeLinkedIn(browser, config, checkpoint)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
+    // try { results.push(await scrapeLinkedIn(browser, config, checkpoint)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
 
     console.log('\n[main] Scraping Anywhere Remote Jobs...');
     try { results.push(await scrapeAnywhereRemote(browser, config, checkpoint)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
@@ -88,8 +88,19 @@ async function main(): Promise<void> {
     const classifiedJobs = await classifyJobs(newJobs, config);
     const strongJobs = classifiedJobs.filter((j) => j.aiMatch === 'strong');
     const weakJobs = classifiedJobs.filter((j) => j.aiMatch === 'weak');
-    const aiExcluded = classifiedJobs.filter((j) => j.aiMatch === 'excluded').length;
-    console.log(`[main] AI classification: ${strongJobs.length} strong, ${weakJobs.length} weak, ${aiExcluded} excluded`);
+    const aiExcludedJobs = classifiedJobs.filter((j) => j.aiMatch === 'excluded');
+    console.log(`[main] AI classification: ${strongJobs.length} strong, ${weakJobs.length} weak, ${aiExcludedJobs.length} excluded`);
+
+    const aiExcludedAt = new Date().toISOString();
+    const aiExcludedForLog = aiExcludedJobs.map((j) => ({
+      title: j.title,
+      company: j.company,
+      url: j.url,
+      source: j.source,
+      datePosted: j.datePosted || 'unknown',
+      excludedAt: aiExcludedAt,
+      reasons: ['ai-filter', j.aiReason].filter(Boolean),
+    }));
 
     function groupBySource(jobs: AIClassifiedJob[]): Partial<Record<JobSource, AIClassifiedJob[]>> {
       const map: Partial<Record<JobSource, AIClassifiedJob[]>> = {};
@@ -126,8 +137,9 @@ async function main(): Promise<void> {
 
     // Persist excluded jobs (dev only)
     if (process.env['NODE_ENV'] === 'development') {
-      saveExcludedJobs(EXCLUDED_JOBS_PATH, excludedJobs);
-      console.log(`[main] Updated excluded-jobs.json (+${excludedJobs.length} exclusions)`);
+      const allExcluded = [...excludedJobs, ...aiExcludedForLog];
+      saveExcludedJobs(EXCLUDED_JOBS_PATH, allExcluded);
+      console.log(`[main] Updated excluded-jobs.json (+${allExcluded.length} exclusions, ${aiExcludedForLog.length} from AI filter)`);
     }
 
     // Send email only if there are new jobs

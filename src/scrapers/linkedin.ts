@@ -36,11 +36,8 @@ const LI_CONTRACT_MAP: Partial<Record<ContractType, string>> = {
   temporary: 'T',
 };
 
-function buildLinkedInParams(config: AppConfig): Record<string, string> {
-  // f_E: deduplicated, sorted experience codes
-  const expCodes = [...new Set(
-    config.filters.experience.flatMap((lvl) => LI_EXPERIENCE_MAP[lvl] ?? []),
-  )].sort((a, b) => a - b);
+function buildLinkedInParamsForExp(config: AppConfig, exp: ExperienceLevel): Record<string, string> {
+  const expCodes = [...new Set(LI_EXPERIENCE_MAP[exp] ?? [])].sort((a, b) => a - b);
 
   // f_JT: from contractTypes; default F,C,T if unconfigured
   const jtCodes = config.filters.contractTypes.length > 0
@@ -226,7 +223,7 @@ export async function scrapeLinkedIn(
     return { source: SOURCE, jobs, errors };
   }
 
-  // ── Scrape: each geoId × each keyword ────────────────────────────────────
+  // ── Scrape: each geoId × each keyword × each experience ──────────────────
 
   const geoIds = config.filters.geoLocations
     .filter((loc) => loc in GEO_ID_MAP)
@@ -234,12 +231,13 @@ export async function scrapeLinkedIn(
 
   const maxPages = config.scraping.maxPages;
   const maxJobsPerSearch = config.scraping.maxJobs;
-  const fixedParams = buildLinkedInParams(config);
 
   for (const geo of geoIds) {
     for (const keyword of config.filters.skills) {
-      const searchUrl = buildUrl(keyword, geo.id, fixedParams);
-      console.log(`[linkedin] Scraping "${keyword}" in ${geo.label}…`);
+      for (const exp of config.filters.experience) {
+        const fixedParams = buildLinkedInParamsForExp(config, exp);
+        const searchUrl = buildUrl(keyword, geo.id, fixedParams);
+        console.log(`[linkedin] Scraping "${keyword}" / ${exp} in ${geo.label}…`);
 
       try {
         const ok = await safeGoto(page, searchUrl, 30_000);
@@ -383,11 +381,14 @@ export async function scrapeLinkedIn(
         }
 
         if (batchJobs.length > 0) onProgress?.(batchJobs);
-        console.log(`[linkedin] "${keyword}" in ${geo.label}: ${jobsThisSearch} jobs`);
+        console.log(`[linkedin] "${keyword}" / ${exp} in ${geo.label}: ${jobsThisSearch} jobs`);
       } catch (err) {
-        const msg = `[linkedin] Error on "${keyword}" in ${geo.label}: ${err instanceof Error ? err.message : String(err)}`;
+        const msg = `[linkedin] Error on "${keyword}" / ${exp} in ${geo.label}: ${err instanceof Error ? err.message : String(err)}`;
         console.error(msg);
         errors.push(msg);
+      }
+
+      await delay(randomInt(3000, 6000), randomInt(3000, 6000));
       }
 
       await delay(randomInt(5000, 9000), randomInt(5000, 9000));
