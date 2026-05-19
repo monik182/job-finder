@@ -78,7 +78,10 @@ function isAuthWall(url: string): boolean {
   return url.includes('/login') || url.includes('/checkpoint') || url.includes('/authwall');
 }
 
-export async function scrapeLinkedIn(browser: Browser): Promise<ScrapeResult> {
+export async function scrapeLinkedIn(
+  browser: Browser,
+  onProgress?: (newJobs: RawJob[]) => void,
+): Promise<ScrapeResult> {
   const jobs: RawJob[] = [];
   const errors: string[] = [];
   const seenUrls = new Set<string>();
@@ -201,6 +204,7 @@ export async function scrapeLinkedIn(browser: Browser): Promise<ScrapeResult> {
         await delay(randomInt(1000, 2000), randomInt(1000, 2000));
 
         let jobsThisSearch = 0;
+        const batchJobs: RawJob[] = [];
 
         for (let pageNum = 0; pageNum < MAX_PAGES && jobsThisSearch < MAX_JOBS_PER_SEARCH; pageNum++) {
           // Wait for the job list to render
@@ -284,7 +288,7 @@ export async function scrapeLinkedIn(browser: Browser): Promise<ScrapeResult> {
             if (seenUrls.has(jobData.url)) continue;
             seenUrls.add(jobData.url);
 
-            jobs.push({
+            const job: RawJob = {
               title: jobData.title,
               company: jobData.company,
               location: jobData.location,
@@ -293,7 +297,9 @@ export async function scrapeLinkedIn(browser: Browser): Promise<ScrapeResult> {
               description: jobData.description,
               source: SOURCE,
               scrapedAt,
-            });
+            };
+            jobs.push(job);
+            batchJobs.push(job);
 
             jobsThisSearch++;
             console.log(`[linkedin]   ✓ "${jobData.title}" @ "${jobData.company}"`);
@@ -320,6 +326,7 @@ export async function scrapeLinkedIn(browser: Browser): Promise<ScrapeResult> {
           }
         }
 
+        if (batchJobs.length > 0) onProgress?.(batchJobs);
         console.log(`[linkedin] "${keyword}" in ${geo.label}: ${jobsThisSearch} jobs`);
       } catch (err) {
         const msg = `[linkedin] Error on "${keyword}" in ${geo.label}: ${err instanceof Error ? err.message : String(err)}`;

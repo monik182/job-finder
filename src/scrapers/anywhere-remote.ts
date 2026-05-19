@@ -40,7 +40,10 @@ interface RawJobData {
   tags: string;
 }
 
-export async function scrapeAnywhereRemote(browser: Browser): Promise<ScrapeResult> {
+export async function scrapeAnywhereRemote(
+  browser: Browser,
+  onProgress?: (newJobs: RawJob[]) => void,
+): Promise<ScrapeResult> {
   const jobs: RawJob[] = [];
   const errors: string[] = [];
   const seenUrls = new Set<string>();
@@ -107,11 +110,12 @@ export async function scrapeAnywhereRemote(browser: Browser): Promise<ScrapeResu
         BASE_URL,
       );
 
+      const batchJobs: RawJob[] = [];
       for (const raw of rawJobs) {
         if (seenUrls.has(raw.url)) continue;
         seenUrls.add(raw.url);
 
-        jobs.push({
+        const job: RawJob = {
           title: raw.title,
           company: raw.company,
           location: 'Remote',
@@ -120,9 +124,12 @@ export async function scrapeAnywhereRemote(browser: Browser): Promise<ScrapeResu
           description: raw.tags,
           source: SOURCE,
           scrapedAt,
-        });
+        };
+        jobs.push(job);
+        batchJobs.push(job);
       }
 
+      if (batchJobs.length > 0) onProgress?.(batchJobs);
       console.log(`[anywhere-remote] Page ${pageNum}: ${rawJobs.length} listings`);
 
       // Check for next page

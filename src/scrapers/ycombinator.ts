@@ -48,7 +48,10 @@ interface RawJobData {
   url: string;
 }
 
-export async function scrapeYCombinator(browser: Browser): Promise<ScrapeResult> {
+export async function scrapeYCombinator(
+  browser: Browser,
+  onProgress?: (newJobs: RawJob[]) => void,
+): Promise<ScrapeResult> {
   const jobs: RawJob[] = [];
   const errors: string[] = [];
   const seenUrls = new Set<string>();
@@ -185,11 +188,12 @@ export async function scrapeYCombinator(browser: Browser): Promise<ScrapeResult>
         JOBS_PER_COMBINATION,
       );
 
+      const batchJobs: RawJob[] = [];
       for (const raw of rawJobs) {
         if (seenUrls.has(raw.url)) continue;
         seenUrls.add(raw.url);
 
-        jobs.push({
+        const job: RawJob = {
           title: raw.title,
           company: raw.company,
           location: raw.tags,
@@ -198,9 +202,12 @@ export async function scrapeYCombinator(browser: Browser): Promise<ScrapeResult>
           description: raw.tags,
           source: SOURCE,
           scrapedAt,
-        });
+        };
+        jobs.push(job);
+        batchJobs.push(job);
       }
 
+      if (batchJobs.length > 0) onProgress?.(batchJobs);
       console.log(`[ycombinator] "${param}=${value}": ${rawJobs.length} listings`);
     } catch (err) {
       const msg = `[ycombinator] Error scraping "${param}=${value}": ${err instanceof Error ? err.message : String(err)}`;
