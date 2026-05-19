@@ -31,6 +31,10 @@ jobs:
           MY_EMAIL: ${{ secrets.MY_EMAIL }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LINKEDIN_EMAIL: ${{ secrets.LINKEDIN_EMAIL }}
+          LINKEDIN_PASSWORD: ${{ secrets.LINKEDIN_PASSWORD }}
+          YC_EMAIL: ${{ secrets.YC_EMAIL }}
+          YC_PASSWORD: ${{ secrets.YC_PASSWORD }}
         run: npm start
 
       - name: Commit updated seen-jobs.json and runs.log
