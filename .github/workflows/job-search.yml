@@ -30,6 +30,7 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           MY_EMAIL: ${{ secrets.MY_EMAIL }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: npm start
 
       - name: Commit updated seen-jobs.json

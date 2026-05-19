@@ -10,7 +10,8 @@ import { filterJobs, saveExcludedJobs, saveRawJobs } from './filters/filter-jobs
 import { loadSeenJobs, saveSeenJobs, deduplicateJobs } from './dedup/dedup.js';
 import { sendEmail } from './email/send-email.js';
 import { buildRunLog, appendRunLog } from './logger.js';
-import { type EmailReport, type FilteredJob, type JobSource, type RawJob, type ScrapeResult } from './types.js';
+import { classifyJobs } from './ai-filter/ai-filter.js';
+import { type AIClassifiedJob, type EmailReport, type JobSource, type RawJob, type ScrapeResult } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SEEN_JOBS_PATH = resolve(__dirname, '..', 'seen-jobs.json');
@@ -82,28 +83,38 @@ async function main(): Promise<void> {
     const { newJobs, updatedStore } = deduplicateJobs(filteredJobs, store);
     console.log(`[main] New jobs (not seen before): ${newJobs.length}`);
 
-    // Group by source
-    const jobsBySource: Partial<Record<JobSource, FilteredJob[]>> = {};
-    for (const job of newJobs) {
-      const existing = jobsBySource[job.source] ?? [];
-      existing.push(job);
-      jobsBySource[job.source] = existing;
-    }
+    // Phase 6.5: AI classification
+    console.log('\n[main] Running AI classification...');
+    const classifiedJobs = await classifyJobs(newJobs, config);
+    const strongJobs = classifiedJobs.filter((j) => j.aiMatch === 'strong');
+    const weakJobs = classifiedJobs.filter((j) => j.aiMatch === 'weak');
+    console.log(`[main] AI classification: ${strongJobs.length} strong, ${weakJobs.length} weak`);
 
-    // Sort within each source: high priority first
-    for (const source of Object.keys(jobsBySource) as JobSource[]) {
-      jobsBySource[source] = (jobsBySource[source] ?? []).sort((a, b) => {
-        if (a.isHighPriority && !b.isHighPriority) return -1;
-        if (!a.isHighPriority && b.isHighPriority) return 1;
-        return 0;
-      });
+    function groupBySource(jobs: AIClassifiedJob[]): Partial<Record<JobSource, AIClassifiedJob[]>> {
+      const map: Partial<Record<JobSource, AIClassifiedJob[]>> = {};
+      for (const job of jobs) {
+        const existing = map[job.source] ?? [];
+        existing.push(job);
+        map[job.source] = existing;
+      }
+      for (const source of Object.keys(map) as JobSource[]) {
+        map[source] = (map[source] ?? []).sort((a, b) => {
+          if (a.isHighPriority && !b.isHighPriority) return -1;
+          if (!a.isHighPriority && b.isHighPriority) return 1;
+          return 0;
+        });
+      }
+      return map;
     }
 
     const report: EmailReport = {
       totalFound: allRawJobs.length,
       totalAfterFilter: filteredJobs.length,
       totalNew: newJobs.length,
-      jobsBySource,
+      totalStrong: strongJobs.length,
+      totalWeak: weakJobs.length,
+      strongBySource: groupBySource(strongJobs),
+      weakBySource: groupBySource(weakJobs),
       date: getDate(),
       scraperErrors: allErrors,
     };

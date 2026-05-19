@@ -16,6 +16,13 @@ export interface FilteredJob extends RawJob {
   priorityReasons: string[];
 }
 
+export type AIMatch = 'strong' | 'weak';
+
+export interface AIClassifiedJob extends FilteredJob {
+  aiMatch: AIMatch;
+  aiReason: string;
+}
+
 export interface SeenJobsStore {
   lastUpdated: string;
   hashes: string[];
@@ -46,7 +53,10 @@ export interface EmailReport {
   totalFound: number;
   totalAfterFilter: number;
   totalNew: number;
-  jobsBySource: Partial<Record<JobSource, FilteredJob[]>>;
+  totalStrong: number;
+  totalWeak: number;
+  strongBySource: Partial<Record<JobSource, AIClassifiedJob[]>>;
+  weakBySource: Partial<Record<JobSource, AIClassifiedJob[]>>;
   date: string;
   scraperErrors: string[];
 }

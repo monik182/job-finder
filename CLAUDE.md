@@ -418,7 +418,7 @@ hash = sha256(key)
 ## Email System (`src/email/send-email.ts`)
 
 **Resend config:**
-- From: `Job Finder BOT <{FROM_EMAIL}>`
+- From: `FROM_EMAIL`
 - To: `MY_EMAIL`
 
 **Subject lines:**
