@@ -42,8 +42,9 @@ const KEYWORDS = [
   'node.js',
 ];
 
+// Selectors — update here if the site changes
 const SEL = {
-  // Login
+  // Login page
   emailInput: 'input[type="email"]',
   passwordInput: 'input[type="password"]',
   // Job list — each li contains a div with data-job-id
