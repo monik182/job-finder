@@ -128,8 +128,11 @@ function buildHtmlEmail(report: EmailReport): string {
     <!-- Summary bar -->
     <div style="background:#f0f9ff;border-bottom:1px solid #bae6fd;padding:12px 32px;display:flex;gap:24px;flex-wrap:wrap;">
       <span style="font-size:13px;color:#0369a1;">Found: <strong>${report.totalFound}</strong></span>
+      <span style="margin-left: 10px"> | </span>
       <span style="font-size:13px;color:#0369a1;">After filters: <strong>${report.totalAfterFilter}</strong></span>
+      <span style="margin-left: 10px"> | </span>
       <span style="font-size:13px;color:#0369a1;font-weight:700;">Strong: <strong style="color:#0284c7;">${report.totalStrong}</strong></span>
+      <span style="margin-left: 10px"> | </span>
       <span style="font-size:13px;color:#6b7280;">Other: <strong>${report.totalWeak}</strong></span>
     </div>
 
