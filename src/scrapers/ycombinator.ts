@@ -131,6 +131,7 @@ export async function scrapeYCombinator(
   // --- Scrape each query combination ---
   for (const { param, value } of queries) {
     const url = `${baseUrl}&${param}=${encodeURIComponent(value)}`;
+    console.log(`[ycombinator] Scraping: ${url}`);
 
     try {
       try {
@@ -228,7 +229,7 @@ export async function scrapeYCombinator(
     await delay(Math.max(minWait, 5000), Math.max(minWait, 9000));
   }
 
-  await page.close();
+  try { await page.close(); } catch { /* page may already be closed */ }
   console.log(`[ycombinator] Total: ${jobs.length} jobs (${seenUrls.size} unique)`);
   return { source: SOURCE, jobs, errors };
 }

@@ -4,3 +4,5 @@ dist/
 *.js.map
 excluded-jobs.json
 raw-jobs.json
+linkedin-cookies.json
+debug-linkedin-login-attempt-*.png

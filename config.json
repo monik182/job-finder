@@ -2,7 +2,8 @@
   "scraping": {
     "maxPages": 2,
     "maxJobs": 30,
-    "maxAgeDays": 7
+    "maxAgeDays": 7,
+    "minDelayMs": 3000
   },
   "filters": {
     "geoLocations": ["worldwide", "europe"],
@@ -15,7 +16,7 @@
     "excludeSoutheastAsia": true,
     "excludeSkills": [".net", "java", "c#", "php"],
     "excludeClearance": true,
-    "experience": ["senior"],
+    "experience": ["senior", "mid"],
     "excludeOnSite": true,
     "excludeHybrid": true,
     "remote": true,

@@ -2,7 +2,7 @@ name: Daily Job Search
 
 on:
   schedule:
-    - cron: '2 6 * * *'   # 6:02 AM UTC daily (7:02 AM CET / 8:02 AM CEST)
+    - cron: '2 4 * * *'   # 4:02 AM UTC daily (5:02 AM CET / 6:02 AM CEST)
   workflow_dispatch:        # Allow manual trigger from Actions UI
 
 jobs:
@@ -23,6 +23,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Restore LinkedIn cookies
+        env:
+          LINKEDIN_COOKIES: ${{ secrets.LINKEDIN_COOKIES }}
+        run: |
+          if [ -n "$LINKEDIN_COOKIES" ]; then
+            echo "$LINKEDIN_COOKIES" > linkedin-cookies.json
+          fi
 
       - name: Run job search
         env:

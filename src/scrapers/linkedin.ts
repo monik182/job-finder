@@ -1,7 +1,28 @@
-import { type Browser, type Page } from 'puppeteer-core';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { type Browser, type Page, type CookieParam } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
 import { type AppConfig, type GeoLocation, type ExperienceLevel, type ContractType, getSearchTerms } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const COOKIES_PATH = resolve(__dirname, '..', '..', 'linkedin-cookies.json');
+
+function loadCookies(): CookieParam[] | null {
+  if (!existsSync(COOKIES_PATH)) return null;
+  try {
+    return JSON.parse(readFileSync(COOKIES_PATH, 'utf-8')) as CookieParam[];
+  } catch {
+    return null;
+  }
+}
+
+async function saveCookies(page: Page): Promise<void> {
+  const cookies = await page.cookies();
+  writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
+  console.log('[linkedin] Cookies saved to linkedin-cookies.json');
+}
 
 const SOURCE = 'linkedin' as const;
 const LOGIN_URL = 'https://www.linkedin.com/login/';
@@ -81,9 +102,11 @@ function randomInt(min: number, max: number): number {
 }
 
 async function moveMouse(page: Page): Promise<void> {
-  const x = randomInt(200, 1100);
-  const y = randomInt(100, 700);
-  await page.mouse.move(x, y, { steps: randomInt(8, 20) });
+  try {
+    const x = randomInt(200, 1100);
+    const y = randomInt(100, 700);
+    await page.mouse.move(x, y, { steps: randomInt(8, 20) });
+  } catch { /* ignore — cosmetic only */ }
 }
 
 function buildUrl(keyword: string, geoId: string, fixedParams: Record<string, string>): string {
@@ -117,110 +140,96 @@ export async function scrapeLinkedIn(
 
   const page = await newPage(browser);
 
-  // ── Login (up to 3 attempts) ──────────────────────────────────────────────
+  // ── Auth: try saved cookies first, fall back to login ────────────────────
 
-  const MAX_LOGIN_ATTEMPTS = 3;
   let loginSucceeded = false;
-  let lastLoginError = '';
 
-  for (let attempt = 1; attempt <= MAX_LOGIN_ATTEMPTS; attempt++) {
-    try {
-      if (attempt > 1) {
-        console.warn(`[linkedin] Retrying login (attempt ${attempt}/${MAX_LOGIN_ATTEMPTS})…`);
-        await delay(randomInt(2000, 4000), randomInt(2000, 4000));
-      }
-
-      const loginLoaded = await safeGoto(page, LOGIN_URL, 15_000);
-      if (!loginLoaded) {
-        lastLoginError = '[linkedin] Failed to load login page';
-        continue;
-      }
-
-      await page.waitForSelector(SEL.emailInput, { timeout: 15_000, visible: true });
-      await delay(randomInt(800, 1500), randomInt(800, 1500));
-      await moveMouse(page);
-
-      // Email — use evaluate to bypass headless clickability issues
-      await page.evaluate((sel: string, val: string) => {
-        const el = document.querySelector<HTMLInputElement>(sel);
-        if (el) {
-          el.focus();
-          el.value = val;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }, SEL.emailInput, email);
-      await delay(randomInt(600, 1200), randomInt(600, 1200));
-      await moveMouse(page);
-
-      // Password — same approach
-      await page.evaluate((sel: string, val: string) => {
-        const el = document.querySelector<HTMLInputElement>(sel);
-        if (el) {
-          el.focus();
-          el.value = val;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      }, SEL.passwordInput, password);
-      await delay(randomInt(500, 900), randomInt(500, 900));
-      await moveMouse(page);
-
-      // "Keep me signed in" checkbox
-      await page.evaluate(() => {
-        const labels = document.querySelectorAll('label');
-        for (let i = 0; i < labels.length; i++) {
-          const label = labels[i];
-          if (!label) continue;
-          if (label.textContent?.includes('Keep me logged in')) {
-            const forAttr = label.getAttribute('for');
-            const checkbox = forAttr
-              ? document.getElementById(forAttr)
-              : label.querySelector('input[type="checkbox"]');
-            if (checkbox && 'checked' in checkbox && !(checkbox as HTMLInputElement).checked) {
-              (checkbox as HTMLInputElement).click();
-            }
-            break;
-          }
-        }
-      });
-      await delay(randomInt(300, 700), randomInt(300, 700));
-      await moveMouse(page);
-
-      // "Sign in" button (type="button", text "Sign in")
-      await page.evaluate(() => {
-        const buttons = document.querySelectorAll('button');
-        for (let i = 0; i < buttons.length; i++) {
-          const btn = buttons[i];
-          if (btn?.textContent?.trim().toLowerCase() === 'sign in') {
-            (btn as HTMLButtonElement).click();
-            break;
-          }
-        }
-      });
-
-      await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 });
-
-      if (isAuthWall(page.url())) {
-        lastLoginError = `[linkedin] Login may have failed — landed on: ${page.url()}`;
-        console.error(lastLoginError);
-        continue;
-      }
-
+  const savedCookies = loadCookies();
+  if (savedCookies) {
+    console.log('[linkedin] Found saved cookies — attempting cookie-based auth…');
+    await page.setCookie(...savedCookies);
+    const ok = await safeGoto(page, 'https://www.linkedin.com/feed/', 15_000);
+    if (ok && !isAuthWall(page.url())) {
+      console.log('[linkedin] Cookie auth successful');
       loginSucceeded = true;
-      console.log(`[linkedin] Login successful${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
-      await delay(randomInt(2000, 3500), randomInt(2000, 3500));
-      break;
-    } catch (err) {
-      lastLoginError = `[linkedin] Login error: ${err instanceof Error ? err.message : String(err)}`;
-      console.error(`${lastLoginError}${attempt < MAX_LOGIN_ATTEMPTS ? ' — will retry' : ''}`);
+      await delay(randomInt(1500, 2500), randomInt(1500, 2500));
+    } else {
+      console.warn('[linkedin] Cookies expired or invalid — falling back to login');
     }
   }
 
   if (!loginSucceeded) {
-    errors.push(lastLoginError);
-    await page.close();
-    return { source: SOURCE, jobs, errors };
+    const MAX_LOGIN_ATTEMPTS = 3;
+    let lastLoginError = '';
+
+    for (let attempt = 1; attempt <= MAX_LOGIN_ATTEMPTS; attempt++) {
+      try {
+        if (attempt > 1) {
+          console.warn(`[linkedin] Retrying login (attempt ${attempt}/${MAX_LOGIN_ATTEMPTS})…`);
+          await delay(randomInt(2000, 4000), randomInt(2000, 4000));
+        }
+
+        const loginLoaded = await safeGoto(page, LOGIN_URL, 15_000);
+        if (!loginLoaded) {
+          lastLoginError = '[linkedin] Failed to load login page';
+          continue;
+        }
+
+        await page.waitForSelector(SEL.emailInput, { timeout: 15_000, visible: true });
+        await delay(randomInt(800, 1500), randomInt(800, 1500));
+        await moveMouse(page);
+
+        await page.click(SEL.emailInput);
+        await page.type(SEL.emailInput, email, { delay: randomInt(80, 150) });
+        await delay(randomInt(600, 1200), randomInt(600, 1200));
+        await moveMouse(page);
+
+        await page.click(SEL.passwordInput);
+        await page.type(SEL.passwordInput, password, { delay: randomInt(80, 150) });
+        await delay(randomInt(500, 900), randomInt(500, 900));
+        await moveMouse(page);
+
+        // "Sign in" button
+        await page.evaluate(() => {
+          const buttons = document.querySelectorAll('button');
+          for (let i = 0; i < buttons.length; i++) {
+            const btn = buttons[i];
+            if (btn?.textContent?.trim().toLowerCase() === 'sign in') {
+              (btn as HTMLButtonElement).click();
+              break;
+            }
+          }
+        });
+
+        await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+
+        if (isAuthWall(page.url())) {
+          lastLoginError = `[linkedin] Login may have failed — landed on: ${page.url()}`;
+          console.error(lastLoginError);
+          continue;
+        }
+
+        loginSucceeded = true;
+        console.log(`[linkedin] Login successful${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
+        await saveCookies(page);
+        await delay(randomInt(2000, 3500), randomInt(2000, 3500));
+        break;
+      } catch (err) {
+        lastLoginError = `[linkedin] Login error: ${err instanceof Error ? err.message : String(err)}`;
+        try {
+          const screenshotPath = `debug-linkedin-login-attempt-${attempt}.png`;
+          await page.screenshot({ path: screenshotPath, fullPage: true });
+          console.error(`[linkedin] Screenshot saved: ${screenshotPath}`);
+        } catch { /* ignore screenshot errors */ }
+        console.error(`${lastLoginError}${attempt < MAX_LOGIN_ATTEMPTS ? ' — will retry' : ''}`);
+      }
+    }
+
+    if (!loginSucceeded) {
+      errors.push(lastLoginError);
+      await page.close();
+      return { source: SOURCE, jobs, errors };
+    }
   }
 
   // ── Scrape: each geoId × each keyword × each experience ──────────────────
@@ -387,6 +396,10 @@ export async function scrapeLinkedIn(
         const msg = `[linkedin] Error on "${keyword}" / ${exp} in ${geo.label}: ${err instanceof Error ? err.message : String(err)}`;
         console.error(msg);
         errors.push(msg);
+        if (page.isClosed()) {
+          console.warn('[linkedin] Page is closed — stopping scrape');
+          return { source: SOURCE, jobs, errors };
+        }
       }
 
       await delay(Math.max(minWait, 3000), Math.max(minWait, 6000));
