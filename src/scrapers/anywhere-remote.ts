@@ -1,10 +1,21 @@
 import { type Browser } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
-import { type AppConfig } from '../config.js';
+import { type AppConfig, type ExperienceLevel } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 
 const SOURCE = 'anywhere-remote' as const;
 const BASE_URL = 'https://anywhereremotejobs.com';
+
+const ANYWHERE_REMOTE_EXPERIENCE_MAP: Record<ExperienceLevel, string> = {
+  junior: 'Junior',
+  mid: 'Mid-level',
+  senior: 'Senior',
+  lead: 'Senior',
+  staff: 'Senior',
+  principal: 'Senior',
+  director: 'Senior',
+  'c-level': 'Senior',
+};
 
 const ANYWHERE_REMOTE_GEO_MAP: Partial<Record<import('../config.js').GeoLocation, string>> = {
   latam: 'LATAM',
@@ -29,8 +40,10 @@ function buildJobsUrl(config: AppConfig): string {
     params.append(`tech[${i}]`, skill);
   });
 
-  params.append('experience[0]', 'Senior');
-  params.append('experience[1]', 'Mid-level');
+  const experienceValues = [...new Set(
+    config.filters.experience.map((lvl) => ANYWHERE_REMOTE_EXPERIENCE_MAP[lvl]),
+  )];
+  experienceValues.forEach((v, i) => params.append(`experience[${i}]`, v));
 
   return `${BASE_URL}/remote-jobs?${params.toString()}`;
 }

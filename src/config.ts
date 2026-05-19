@@ -21,6 +21,11 @@ export interface SalaryConfig {
   annual: number | null;
 }
 
+export interface PrioritySalaryConfig {
+  hourMin: number;
+  annualMin: number;
+}
+
 export interface FiltersConfig {
   geoLocations: GeoLocation[];
   skills: string[];
@@ -37,6 +42,7 @@ export interface FiltersConfig {
   excludeHybrid: boolean;
   remote: boolean;
   salary: SalaryConfig;
+  prioritySalary: PrioritySalaryConfig;
   contractTypes: ContractType[];
 }
 

@@ -12,9 +12,9 @@ const BASE_COMPANIES_URL =
 function buildBaseUrl(config: AppConfig): string {
   const params = new URLSearchParams(BASE_COMPANIES_URL.split('?')[1]);
   if (config.filters.remote) {
-    params.set('remote', 'only');
-    params.set('remote', 'yes');
-  };
+    params.append('remote', 'yes');
+    params.append('remote', 'only');
+  }
   return `https://www.workatastartup.com/companies?${params.toString()}`;
 }
 

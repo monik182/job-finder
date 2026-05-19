@@ -24,6 +24,10 @@
       "month": null,
       "annual": null
     },
-    "contractTypes": []
+    "contractTypes": [],
+    "prioritySalary": {
+      "hourMin": 40,
+      "annualMin": 80000
+    }
   }
 }

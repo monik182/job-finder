@@ -1,6 +1,6 @@
 import { type Browser, type Page } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
-import { type AppConfig, type GeoLocation } from '../config.js';
+import { type AppConfig, type GeoLocation, type ExperienceLevel, type ContractType } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 
 const SOURCE = 'linkedin' as const;
@@ -8,20 +8,52 @@ const LOGIN_URL = 'https://www.linkedin.com/login/';
 const BASE_URL = 'https://www.linkedin.com/jobs/search/';
 const LI_BASE_URL = 'https://www.linkedin.com';
 
-// Fixed search parameters applied to every search
-// f_E=3,4       → Mid-Senior + Director experience level
-// f_WT=2        → Remote
-// f_JT=P,C,T    → Full-time, Contract, Temporary
-// sortBy=DD     → Most recent
-// f_TPR=r604800 → Past week
-const FIXED_PARAMS: Record<string, string> = {
-  f_E: '3,4',
+// Fixed search parameters (f_E, f_JT, f_TPR are computed from config)
+// f_WT=2 → Remote only
+// sortBy=DD → Most recent
+const BASE_FIXED_PARAMS: Record<string, string> = {
   f_WT: '2',
-  f_JT: 'P,C,T',
   sortBy: 'DD',
   refresh: 'true',
-  f_TPR: 'r604800',
 };
+
+const LI_EXPERIENCE_MAP: Record<ExperienceLevel, number[]> = {
+  junior: [1, 2],
+  mid: [3, 4],
+  senior: [4],
+  lead: [4],
+  staff: [4],
+  principal: [4],
+  director: [5],
+  'c-level': [6],
+};
+
+const LI_CONTRACT_MAP: Partial<Record<ContractType, string>> = {
+  'full-time': 'F',
+  'part-time': 'P',
+  contract: 'C',
+  freelance: 'C',
+  temporary: 'T',
+};
+
+function buildLinkedInParams(config: AppConfig): Record<string, string> {
+  // f_E: deduplicated, sorted experience codes
+  const expCodes = [...new Set(
+    config.filters.experience.flatMap((lvl) => LI_EXPERIENCE_MAP[lvl] ?? []),
+  )].sort((a, b) => a - b);
+
+  // f_JT: from contractTypes; default F,C,T if unconfigured
+  const jtCodes = config.filters.contractTypes.length > 0
+    ? [...new Set(config.filters.contractTypes.map((ct) => LI_CONTRACT_MAP[ct]).filter(Boolean) as string[])]
+    : ['F', 'C', 'T'];
+
+  return {
+    ...BASE_FIXED_PARAMS,
+    f_E: expCodes.join(','),
+    f_JT: jtCodes.join(','),
+    f_TPR: `r${config.scraping.maxAgeDays * 86400}`,
+  };
+}
 
 const GEO_ID_MAP: Record<GeoLocation, { id: string; label: string }> = {
   latam: { id: '91000011', label: 'Latin America' },
@@ -57,8 +89,8 @@ async function moveMouse(page: Page): Promise<void> {
   await page.mouse.move(x, y, { steps: randomInt(8, 20) });
 }
 
-function buildUrl(keyword: string, geoId: string): string {
-  const params = new URLSearchParams({ ...FIXED_PARAMS, keywords: keyword, geoId });
+function buildUrl(keyword: string, geoId: string, fixedParams: Record<string, string>): string {
+  const params = new URLSearchParams({ ...fixedParams, keywords: keyword, geoId });
   return `${BASE_URL}?${params.toString()}`;
 }
 
@@ -175,10 +207,11 @@ export async function scrapeLinkedIn(
 
   const maxPages = config.scraping.maxPages;
   const maxJobsPerSearch = config.scraping.maxJobs;
+  const fixedParams = buildLinkedInParams(config);
 
   for (const geo of geoIds) {
     for (const keyword of config.filters.skills) {
-      const searchUrl = buildUrl(keyword, geo.id);
+      const searchUrl = buildUrl(keyword, geo.id, fixedParams);
       console.log(`[linkedin] Scraping "${keyword}" in ${geo.label}…`);
 
       try {

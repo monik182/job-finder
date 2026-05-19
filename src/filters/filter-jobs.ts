@@ -118,10 +118,10 @@ function extractSalaryAmounts(text: string): SalaryAmounts | null {
   return null;
 }
 
-function extractSalaryPriority(text: string): string | null {
+function extractSalaryPriority(text: string, prioritySalary: AppConfig['filters']['prioritySalary']): string | null {
   const amounts = extractSalaryAmounts(text);
   if (!amounts) return null;
-  if (amounts.annual >= 80_000 || amounts.hourly >= 40) {
+  if (amounts.annual >= prioritySalary.annualMin || amounts.hourly >= prioritySalary.hourMin) {
     return `salary $${Math.round(amounts.hourly)}/hr`;
   }
   return null;
@@ -241,7 +241,7 @@ export function filterJobs(jobs: RawJob[], config: AppConfig): FilterResult {
     if (PRIORITY_AI.test(combined)) priorityReasons.push('AI/automation');
     if (PRIORITY_COMPANY_SIZE.test(combined)) priorityReasons.push('startup size');
 
-    const salaryReason = extractSalaryPriority(combined);
+    const salaryReason = extractSalaryPriority(combined, filters.prioritySalary);
     if (salaryReason) priorityReasons.push(salaryReason);
 
     filtered.push({
