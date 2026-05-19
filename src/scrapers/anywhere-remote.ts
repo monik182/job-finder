@@ -73,11 +73,13 @@ export async function scrapeAnywhereRemote(
     .filter((c): c is string => c !== undefined);
   const countryList = locations.length > 0 ? locations : ['Worldwide'];
 
+  const minWait = config.scraping.minDelayMs;
+
   let firstCombination = true;
   for (const country of countryList) {
     for (const skill of config.filters.skills) {
       for (const exp of config.filters.experience) {
-        if (!firstCombination) await delay();
+        if (!firstCombination) await delay(minWait, minWait + 3000);
         firstCombination = false;
 
         const expValue = ANYWHERE_REMOTE_EXPERIENCE_MAP[exp];
@@ -184,7 +186,7 @@ export async function scrapeAnywhereRemote(
             await page.close();
           }
 
-          if (currentUrl) await delay();
+          if (currentUrl) await delay(minWait, minWait + 3000);
         }
       }
     }

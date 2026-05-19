@@ -13,6 +13,7 @@ export interface ScrapingConfig {
   maxPages: number;
   maxJobs: number;
   maxAgeDays: number;
+  minDelayMs: number;
 }
 
 export interface SalaryConfig {

@@ -231,6 +231,7 @@ export async function scrapeLinkedIn(
 
   const maxPages = config.scraping.maxPages;
   const maxJobsPerSearch = config.scraping.maxJobs;
+  const minWait = config.scraping.minDelayMs;
 
   for (const geo of geoIds) {
     for (const keyword of config.filters.skills) {
@@ -255,7 +256,7 @@ export async function scrapeLinkedIn(
         }
 
         await moveMouse(page);
-        await delay(randomInt(1000, 2000), randomInt(1000, 2000));
+        await delay(minWait, minWait + 2000);
 
         let jobsThisSearch = 0;
         const batchJobs: RawJob[] = [];
@@ -373,7 +374,7 @@ export async function scrapeLinkedIn(
               if (!nextBtn) break;
 
               await nextBtn.click();
-              await delay(randomInt(2500, 4000), randomInt(2500, 4000));
+              await delay(minWait, minWait + 2000);
             } catch {
               break;
             }
@@ -388,14 +389,14 @@ export async function scrapeLinkedIn(
         errors.push(msg);
       }
 
-      await delay(randomInt(3000, 6000), randomInt(3000, 6000));
+      await delay(Math.max(minWait, 3000), Math.max(minWait, 6000));
       }
 
-      await delay(randomInt(5000, 9000), randomInt(5000, 9000));
+      await delay(Math.max(minWait, 5000), Math.max(minWait, 9000));
     }
 
     // Extra pause between geographic regions
-    await delay(randomInt(8000, 12000), randomInt(8000, 12000));
+    await delay(Math.max(minWait, 8000), Math.max(minWait, 12000));
   }
 
   await page.close();

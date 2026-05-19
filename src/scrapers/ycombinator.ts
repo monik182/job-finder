@@ -138,6 +138,7 @@ export async function scrapeYCombinator(
 
   const queries = buildQueries(config);
   const jobsPerCombination = config.scraping.maxJobs;
+  const minWait = config.scraping.minDelayMs;
   const baseUrl = buildBaseUrl(config);
 
   // --- Scrape each query combination ---
@@ -149,7 +150,7 @@ export async function scrapeYCombinator(
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       } catch (err) {
         errors.push(`[ycombinator] Failed to load: ${url} — ${err instanceof Error ? err.message : String(err)}`);
-        await delay();
+        await delay(minWait, minWait + 3000);
         continue;
       }
 
@@ -158,7 +159,7 @@ export async function scrapeYCombinator(
         await page.waitForSelector(SEL.directoryList, { timeout: 30_000 });
       } catch {
         console.warn(`[ycombinator] "${param}=${value}": directory-list not found`);
-        await delay();
+        await delay(minWait, minWait + 3000);
         continue;
       }
 
@@ -237,7 +238,7 @@ export async function scrapeYCombinator(
       errors.push(msg);
     }
 
-    await delay(randomInt(5000, 9000), randomInt(5000, 9000));
+    await delay(Math.max(minWait, 5000), Math.max(minWait, 9000));
   }
 
   await page.close();
