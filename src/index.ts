@@ -4,14 +4,15 @@ import { getBrowser, closeBrowser } from './browser.js';
 import { scrapeAnywhereRemote } from './scrapers/anywhere-remote.js';
 import { scrapeYCombinator } from './scrapers/ycombinator.js';
 import { scrapeLinkedIn } from './scrapers/linkedin.js';
-import { filterJobs, saveExcludedJobs } from './filters/filter-jobs.js';
+import { filterJobs, saveExcludedJobs, saveRawJobs } from './filters/filter-jobs.js';
 import { loadSeenJobs, saveSeenJobs, deduplicateJobs } from './dedup/dedup.js';
 import { sendEmail } from './email/send-email.js';
 import { buildRunLog, appendRunLog } from './logger.js';
-import { type EmailReport, type FilteredJob, type JobSource, type ScrapeResult } from './types.js';
+import { type EmailReport, type FilteredJob, type JobSource, type RawJob, type ScrapeResult } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SEEN_JOBS_PATH = resolve(__dirname, '..', 'seen-jobs.json');
+const RAW_JOBS_PATH = resolve(__dirname, '..', 'raw-jobs.json');
 const EXCLUDED_JOBS_PATH = resolve(__dirname, '..', 'excluded-jobs.json');
 const RUNS_LOG_PATH = resolve(__dirname, '..', 'runs.log');
 
@@ -44,21 +45,26 @@ async function main(): Promise<void> {
   try {
     // Scrape in order: safest first, riskiest (LinkedIn) last
     const results: ScrapeResult[] = [];
+    const allRawJobs: RawJob[] = [];
+
+    const checkpoint = (newJobs: RawJob[]): void => {
+      allRawJobs.push(...newJobs);
+      saveRawJobs(RAW_JOBS_PATH, allRawJobs);
+    };
 
     console.log('\n[main] Scraping Anywhere Remote Jobs...');
-    // try { results.push(await scrapeAnywhereRemote(browser)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
+    // try { results.push(await scrapeAnywhereRemote(browser, checkpoint)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
 
     console.log('\n[main] Scraping Work at a Startup (YC)...');
     //TODO: Fix the broken scraper issue.
-    // try { results.push(await scrapeYCombinator(browser)); } catch (e) { console.error('[main] YCombinator failed:', e); }
+    try { results.push(await scrapeYCombinator(browser, checkpoint)); } catch (e) { console.error('[main] YCombinator failed:', e); }
 
     console.log('\n[main] Scraping LinkedIn...');
-    try { results.push(await scrapeLinkedIn(browser)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
+    // try { results.push(await scrapeLinkedIn(browser, checkpoint)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
 
-    const allRawJobs = results.flatMap((r) => r.jobs);
     results.forEach((r) => allErrors.push(...r.errors));
 
-    console.log(`\n[main] Total raw jobs collected: ${allRawJobs.length}`);
+    console.log(`\n[main] Total raw jobs collected: ${allRawJobs.length} (saved to raw-jobs.json)`);
 
     // Filter
     const { filtered: filteredJobs, excluded: excludedJobs } = filterJobs(allRawJobs);

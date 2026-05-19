@@ -177,6 +177,11 @@ export function filterJobs(jobs: RawJob[]): FilterResult {
   return { filtered, excluded };
 }
 
+export function saveRawJobs(filePath: string, jobs: RawJob[]): void {
+  const store = { savedAt: new Date().toISOString(), count: jobs.length, jobs };
+  writeFileSync(filePath, JSON.stringify(store, null, 2), 'utf-8');
+}
+
 export function saveExcludedJobs(path: string, newExclusions: ExcludedJob[]): void {
   let store: ExcludedJobsStore;
 
