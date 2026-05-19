@@ -33,10 +33,10 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: npm start
 
-      - name: Commit updated seen-jobs.json
+      - name: Commit updated seen-jobs.json and runs.log
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add seen-jobs.json
-          git diff --staged --quiet || git commit -m "chore: update seen-jobs.json [skip ci]"
+          git add seen-jobs.json runs.log
+          git diff --staged --quiet || git commit -m "chore: update seen-jobs.json and runs.log [skip ci]"
           git push
