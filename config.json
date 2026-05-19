@@ -5,9 +5,9 @@
     "maxAgeDays": 7
   },
   "filters": {
-    "geoLocations": ["latam", "europe", "worldwide"],
-    "skills": ["react", "angular", "typescript", "next.js", "node.js", "frontend", "fullstack"],
-    "jobTitle": ["frontend", "front-end", "fullstack", "full-stack"],
+    "geoLocations": ["worldwide"],
+    "skills": ["react"],
+    "jobTitle": ["frontend", "front-end", "fullstack", "full-stack", "web developer"],
     "excludedCompanies": ["micro1"],
     "excludeUsOnly": true,
     "excludeIndia": true,
@@ -15,7 +15,7 @@
     "excludeSoutheastAsia": true,
     "excludeSkills": [".net", "java", "c#", "php"],
     "excludeClearance": true,
-    "experience": ["mid", "senior"],
+    "experience": ["junior"],
     "excludeOnSite": true,
     "excludeHybrid": true,
     "remote": true,
