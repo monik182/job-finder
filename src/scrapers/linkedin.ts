@@ -139,19 +139,33 @@ export async function scrapeLinkedIn(
         continue;
       }
 
-      await page.waitForSelector(SEL.emailInput, { timeout: 15_000 });
+      await page.waitForSelector(SEL.emailInput, { timeout: 15_000, visible: true });
       await delay(randomInt(800, 1500), randomInt(800, 1500));
       await moveMouse(page);
 
-      // Email
-      await page.click(SEL.emailInput);
-      await page.type(SEL.emailInput, email, { delay: randomInt(80, 150) });
+      // Email — use evaluate to bypass headless clickability issues
+      await page.evaluate((sel: string, val: string) => {
+        const el = document.querySelector<HTMLInputElement>(sel);
+        if (el) {
+          el.focus();
+          el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, SEL.emailInput, email);
       await delay(randomInt(600, 1200), randomInt(600, 1200));
       await moveMouse(page);
 
-      // Password
-      await page.click(SEL.passwordInput);
-      await page.type(SEL.passwordInput, password, { delay: randomInt(80, 150) });
+      // Password — same approach
+      await page.evaluate((sel: string, val: string) => {
+        const el = document.querySelector<HTMLInputElement>(sel);
+        if (el) {
+          el.focus();
+          el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }, SEL.passwordInput, password);
       await delay(randomInt(500, 900), randomInt(500, 900));
       await moveMouse(page);
 
