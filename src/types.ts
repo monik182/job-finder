@@ -1,4 +1,4 @@
-export type JobSource = 'linkedin' | 'ycombinator' | 'anywhere-remote';
+export type JobSource = 'linkedin' | 'ycombinator' | 'anywhere-remote' | 'working-nomads';
 
 export interface RawJob {
   title: string;

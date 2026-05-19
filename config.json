@@ -5,7 +5,7 @@
     "maxAgeDays": 7
   },
   "filters": {
-    "geoLocations": ["latam", "europe"],
+    "geoLocations": ["latam", "europe", "worldwide"],
     "skills": ["react", "angular", "typescript", "next.js", "node.js", "frontend", "fullstack"],
     "jobTitle": ["frontend", "front-end", "fullstack", "full-stack"],
     "excludedCompanies": ["micro1"],

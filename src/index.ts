@@ -5,6 +5,7 @@ import { loadConfig } from './config.js';
 import { scrapeAnywhereRemote } from './scrapers/anywhere-remote.js';
 import { scrapeYCombinator } from './scrapers/ycombinator.js';
 import { scrapeLinkedIn } from './scrapers/linkedin.js';
+import { scrapeWorkingNomads } from './scrapers/working-nomads.js';
 import { filterJobs, saveExcludedJobs, saveRawJobs } from './filters/filter-jobs.js';
 import { loadSeenJobs, saveSeenJobs, deduplicateJobs } from './dedup/dedup.js';
 import { sendEmail } from './email/send-email.js';
@@ -61,6 +62,9 @@ async function main(): Promise<void> {
 
     console.log('\n[main] Scraping Anywhere Remote Jobs...');
     try { results.push(await scrapeAnywhereRemote(browser, config, checkpoint)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
+
+    console.log('\n[main] Scraping Working Nomads...');
+    try { results.push(await scrapeWorkingNomads(browser, config, checkpoint)); } catch (e) { console.error('[main] Working Nomads failed:', e); }
 
     console.log('\n[main] Scraping Work at a Startup (YC)...');
     try { results.push(await scrapeYCombinator(browser, config, checkpoint)); } catch (e) { console.error('[main] YCombinator failed:', e); }

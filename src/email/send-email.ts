@@ -5,6 +5,7 @@ const SOURCE_LABELS: Record<JobSource, string> = {
   linkedin: 'LinkedIn',
   ycombinator: 'Work at a Startup (YC)',
   'anywhere-remote': 'Anywhere Remote Jobs',
+  'working-nomads': 'Working Nomads',
 };
 
 function formatDate(iso: string | null): string {
