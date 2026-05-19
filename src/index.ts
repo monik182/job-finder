@@ -56,15 +56,14 @@ async function main(): Promise<void> {
       saveRawJobs(RAW_JOBS_PATH, allRawJobs);
     };
 
+    console.log('\n[main] Scraping LinkedIn...');
+    try { results.push(await scrapeLinkedIn(browser, config, checkpoint)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
+
     console.log('\n[main] Scraping Anywhere Remote Jobs...');
     try { results.push(await scrapeAnywhereRemote(browser, config, checkpoint)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
 
     console.log('\n[main] Scraping Work at a Startup (YC)...');
-    //TODO: Fix the broken scraper issue.
     try { results.push(await scrapeYCombinator(browser, config, checkpoint)); } catch (e) { console.error('[main] YCombinator failed:', e); }
-
-    console.log('\n[main] Scraping LinkedIn...');
-    try { results.push(await scrapeLinkedIn(browser, config, checkpoint)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
 
     results.forEach((r) => allErrors.push(...r.errors));
 
