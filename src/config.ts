@@ -40,6 +40,7 @@ export interface FiltersConfig {
   excludeClearance: boolean;
   excludeOnSite: boolean;
   excludeHybrid: boolean;
+  excludeEquityOnly: boolean;
   remote: boolean;
   salary: SalaryConfig;
   prioritySalary: PrioritySalaryConfig;

@@ -26,6 +26,8 @@ const EXCLUDE_UAE =
   /\b(UAE|united\s+arab\s+emirates|dubai|abu\s+dhabi|sharjah|ajman|ras\s+al[- ]khaimah|fujairah|umm\s+al[- ]quwain|gulf|GCC|saudi\s+arabia|riyadh|jeddah|qatar|doha|kuwait|bahrain|oman|muscat)\b/i;
 const EXCLUDE_SEA =
   /\b(vietnam|viet\s*nam|ho\s+chi\s+minh|hanoi|da\s+nang|thailand|bangkok|chiang\s+mai|indonesia|jakarta|bali|surabaya|bandung|philippines|philippine|manila|cebu|malaysia|kuala\s+lumpur|penang|johor|myanmar|burma|yangon|mandalay|cambodia|phnom\s+penh|laos|vientiane|singapore|brunei|timor|southeast\s+asia|south[- ]east\s+asia|sea\s+region)\b|₫|₱|(?<!\w)RM\s*\d|S\$\d/i;
+const EXCLUDE_EQUITY_ONLY =
+  /\b(equity[- ]?only|pure[- ]?equity|equity[- ]?based\s+compensation|compensation[:\s]+equity|equity\s+compensation\s+only|stock[- ]?options?\s+only|no\s+(?:cash\s+)?salary|unpaid|volunteer)\b/i;
 const INCLUDE_REMOTE = /\bremote\b/i;
 
 // ─── Contract type patterns ────────────────────────────────────────────────────
@@ -41,8 +43,6 @@ const CONTRACT_TYPE_PATTERNS: Record<ContractType, RegExp> = {
 // ─── Priority flag patterns ────────────────────────────────────────────────────
 
 const PRIORITY_CONTRACT = /\b(contractor|freelance)\b/i;
-const PRIORITY_AI = /\b(ai|openai|automation|n8n|llm|machine\s+learning|artificial\s+intelligence)\b/i;
-const PRIORITY_COMPANY_SIZE = /\b([5-9]\d|[1-4]\d\d)\s*employees?\b/i;
 
 const SALARY_PATTERN =
   /\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*k?\s*(?:\/|\s+per\s+)?\s*(hr|hour|yr|year|annual)?/gi;
@@ -203,6 +203,7 @@ export function filterJobs(jobs: RawJob[], config: AppConfig): FilterResult {
     }
 
     if (excludeSkillsRegex?.test(combined)) exclusionReasons.push('excluded-skill');
+    if (filters.excludeEquityOnly && EXCLUDE_EQUITY_ONLY.test(combined)) exclusionReasons.push('equity-only');
 
     // ── Pass 2: Required inclusions ────────────────────────────────────────
     const skillsMatch = skillsRegex.test(combined);
@@ -238,8 +239,6 @@ export function filterJobs(jobs: RawJob[], config: AppConfig): FilterResult {
     const priorityReasons: string[] = [];
 
     if (PRIORITY_CONTRACT.test(combined)) priorityReasons.push('contractor/freelance');
-    if (PRIORITY_AI.test(combined)) priorityReasons.push('AI/automation');
-    if (PRIORITY_COMPANY_SIZE.test(combined)) priorityReasons.push('startup size');
 
     const salaryReason = extractSalaryPriority(combined, filters.prioritySalary);
     if (salaryReason) priorityReasons.push(salaryReason);
