@@ -1,21 +1,28 @@
 import { type Browser } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
+import { type AppConfig } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 
 const SOURCE = 'anywhere-remote' as const;
 const BASE_URL = 'https://anywhereremotejobs.com';
-const JOBS_URL =
-  `${BASE_URL}/remote-jobs` +
-  `?country%5B0%5D=Worldwide` +
-  `&hide_reposts=1` +
-  `&tech%5B0%5D=typescript` +
-  `&tech%5B1%5D=angular` +
-  `&tech%5B2%5D=react` +
-  `&tech%5B3%5D=javascript` +
-  `&tech%5B4%5D=generative-ai` +
-  `&tech%5B5%5D=artificial-intelligence` +
-  `&experience%5B0%5D=Senior` +
-  `&experience%5B1%5D=Mid-level`;
+
+function buildJobsUrl(config: AppConfig): string {
+  const params = new URLSearchParams();
+
+  // country%5B%5D=European+Union&country%5B%5D=LATAM&country%5B%5D=United+States
+  const country = config.filters.geoLocations.includes('usa') ? 'United States' : 'Worldwide';
+  params.append('country[0]', country);
+  params.append('hide_reposts', '1');
+
+  config.filters.skills.forEach((skill, i) => {
+    params.append(`tech[${i}]`, skill);
+  });
+
+  params.append('experience[0]', 'Senior');
+  params.append('experience[1]', 'Mid-level');
+
+  return `${BASE_URL}/remote-jobs?${params.toString()}`;
+}
 
 // Selectors — update here if the site changes
 const SEL = {
@@ -42,6 +49,7 @@ interface RawJobData {
 
 export async function scrapeAnywhereRemote(
   browser: Browser,
+  config: AppConfig,
   onProgress?: (newJobs: RawJob[]) => void,
 ): Promise<ScrapeResult> {
   const jobs: RawJob[] = [];
@@ -49,11 +57,11 @@ export async function scrapeAnywhereRemote(
   const seenUrls = new Set<string>();
   const scrapedAt = new Date().toISOString();
 
-  const MAX_PAGES = 3;
-  let currentUrl: string | null = JOBS_URL;
+  const maxPages = config.scraping.maxPages;
+  let currentUrl: string | null = buildJobsUrl(config);
   let pageNum = 1;
 
-  while (currentUrl && pageNum <= MAX_PAGES) {
+  while (currentUrl && pageNum <= maxPages) {
     const page = await newPage(browser);
 
     try {

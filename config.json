@@ -1,0 +1,28 @@
+{
+  "scraping": {
+    "maxPages": 1,
+    "maxJobs": 10,
+    "maxAgeDays": 7
+  },
+  "filters": {
+    "geoLocations": ["europe"],
+    "skills": ["react"],
+    "jobTitle": ["frontend"],
+    "excludedCompanies": [],
+    "excludeUsOnly": true,
+    "excludeIndia": true,
+    "excludeUae": true,
+    "excludeClearance": true,
+    "excludeCLevel": true,
+    "excludeInternOrJunior": true,
+    "excludeOnSite": true,
+    "excludeHybrid": true,
+    "remote": true,
+    "salary": {
+      "hour": null,
+      "month": null,
+      "annual": null
+    },
+    "contractTypes": []
+  }
+}

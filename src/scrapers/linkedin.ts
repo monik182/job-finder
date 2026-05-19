@@ -1,16 +1,12 @@
 import { type Browser, type Page } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
+import { type AppConfig, type GeoLocation } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 
 const SOURCE = 'linkedin' as const;
 const LOGIN_URL = 'https://www.linkedin.com/login/';
 const BASE_URL = 'https://www.linkedin.com/jobs/search/';
 const LI_BASE_URL = 'https://www.linkedin.com';
-
-// How many paginated pages to visit per keyword+geo combination (start with 1)
-const MAX_PAGES = 1;
-// Maximum jobs to extract per keyword+geo combination (start with 10)
-const MAX_JOBS_PER_SEARCH = 10;
 
 // Fixed search parameters applied to every search
 // f_E=3,4       → Mid-Senior + Director experience level
@@ -27,20 +23,11 @@ const FIXED_PARAMS: Record<string, string> = {
   f_TPR: 'r604800',
 };
 
-const GEO_IDS = [
-  { id: '91000000', label: 'European Union' },
-  { id: '91000011', label: 'Latin America' },
-];
-
-const KEYWORDS = [
-  'react',
-  'angular',
-  'typescript',
-  'frontend',
-  'fullstack',
-  'next.js',
-  'node.js',
-];
+const GEO_ID_MAP: Record<GeoLocation, { id: string; label: string }> = {
+  latam: { id: '91000011', label: 'Latin America' },
+  usa: { id: '103644278', label: 'United States' },
+  europe: { id: '91000000', label: 'European Union' },
+};
 
 // Selectors — update here if the site changes
 const SEL = {
@@ -80,6 +67,7 @@ function isAuthWall(url: string): boolean {
 
 export async function scrapeLinkedIn(
   browser: Browser,
+  config: AppConfig,
   onProgress?: (newJobs: RawJob[]) => void,
 ): Promise<ScrapeResult> {
   const jobs: RawJob[] = [];
@@ -180,8 +168,15 @@ export async function scrapeLinkedIn(
 
   // ── Scrape: each geoId × each keyword ────────────────────────────────────
 
-  for (const geo of GEO_IDS) {
-    for (const keyword of KEYWORDS) {
+  const geoIds = config.filters.geoLocations
+    .filter((loc) => loc in GEO_ID_MAP)
+    .map((loc) => GEO_ID_MAP[loc]);
+
+  const maxPages = config.scraping.maxPages;
+  const maxJobsPerSearch = config.scraping.maxJobs;
+
+  for (const geo of geoIds) {
+    for (const keyword of config.filters.skills) {
       const searchUrl = buildUrl(keyword, geo.id);
       console.log(`[linkedin] Scraping "${keyword}" in ${geo.label}…`);
 
@@ -206,7 +201,7 @@ export async function scrapeLinkedIn(
         let jobsThisSearch = 0;
         const batchJobs: RawJob[] = [];
 
-        for (let pageNum = 0; pageNum < MAX_PAGES && jobsThisSearch < MAX_JOBS_PER_SEARCH; pageNum++) {
+        for (let pageNum = 0; pageNum < maxPages && jobsThisSearch < maxJobsPerSearch; pageNum++) {
           // Wait for the job list to render
           try {
             await page.waitForSelector(SEL.jobListItems, { timeout: 15_000 });
@@ -227,7 +222,7 @@ export async function scrapeLinkedIn(
           const jobItems = await page.$$(SEL.jobListItems);
 
           for (const item of jobItems) {
-            if (jobsThisSearch >= MAX_JOBS_PER_SEARCH) break;
+            if (jobsThisSearch >= maxJobsPerSearch) break;
 
             // Only process items that contain a job card (have a data-job-id somewhere)
             const isJobCard = await item.evaluate((el) =>
@@ -306,7 +301,7 @@ export async function scrapeLinkedIn(
           }
 
           // Paginate if more pages remain
-          if (pageNum < MAX_PAGES - 1 && jobsThisSearch < MAX_JOBS_PER_SEARCH) {
+          if (pageNum < maxPages - 1 && jobsThisSearch < maxJobsPerSearch) {
             try {
               await page.evaluate((sel: string) => {
                 document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth', block: 'center' });

@@ -1,6 +1,7 @@
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getBrowser, closeBrowser } from './browser.js';
+import { loadConfig } from './config.js';
 import { scrapeAnywhereRemote } from './scrapers/anywhere-remote.js';
 import { scrapeYCombinator } from './scrapers/ycombinator.js';
 import { scrapeLinkedIn } from './scrapers/linkedin.js';
@@ -36,6 +37,9 @@ async function main(): Promise<void> {
   console.log('=== Job Finder starting ===');
   validateEnv();
 
+  const config = loadConfig();
+  console.log(`[main] Config loaded — skills: [${config.filters.skills.join(', ')}], geo: [${config.filters.geoLocations.join(', ')}]`);
+
   const startedAt = new Date().toISOString();
   const browser = await getBrowser();
   console.log('[main] Connected to Browserless');
@@ -53,21 +57,21 @@ async function main(): Promise<void> {
     };
 
     console.log('\n[main] Scraping Anywhere Remote Jobs...');
-    // try { results.push(await scrapeAnywhereRemote(browser, checkpoint)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
+    try { results.push(await scrapeAnywhereRemote(browser, config, checkpoint)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
 
     console.log('\n[main] Scraping Work at a Startup (YC)...');
     //TODO: Fix the broken scraper issue.
-    try { results.push(await scrapeYCombinator(browser, checkpoint)); } catch (e) { console.error('[main] YCombinator failed:', e); }
+    try { results.push(await scrapeYCombinator(browser, config, checkpoint)); } catch (e) { console.error('[main] YCombinator failed:', e); }
 
     console.log('\n[main] Scraping LinkedIn...');
-    // try { results.push(await scrapeLinkedIn(browser, checkpoint)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
+    try { results.push(await scrapeLinkedIn(browser, config, checkpoint)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
 
     results.forEach((r) => allErrors.push(...r.errors));
 
     console.log(`\n[main] Total raw jobs collected: ${allRawJobs.length} (saved to raw-jobs.json)`);
 
     // Filter
-    const { filtered: filteredJobs, excluded: excludedJobs } = filterJobs(allRawJobs);
+    const { filtered: filteredJobs, excluded: excludedJobs } = filterJobs(allRawJobs, config);
     console.log(`[main] After filtering: ${filteredJobs.length} kept, ${excludedJobs.length} excluded`);
 
     // Dedup

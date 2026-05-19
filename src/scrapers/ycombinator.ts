@@ -1,5 +1,6 @@
 import { type Browser } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
+import { type AppConfig } from '../config.js';
 import { newPage, delay, safeGoto } from './utils.js';
 
 const SOURCE = 'ycombinator' as const;
@@ -7,16 +8,36 @@ const LOGIN_URL =
   'https://account.ycombinator.com/?continue=https%3A%2F%2Fwww.workatastartup.com%2F';
 const BASE_COMPANIES_URL =
   'https://www.workatastartup.com/companies?demographic=any&hasEquity=any&hasSalary=any&industry=any&interviewProcess=any&jobType=any&layout=list-compact&remote=only&role=eng&sortBy=created_desc&tab=any&usVisaNotRequired=true';
-const JOBS_PER_COMBINATION = 20; // 2 pages of 10 each via infinite scroll
 
-const QUERIES = [
-  { param: 'role_type', value: 'fe' },
-  { param: 'role_type', value: 'fs' },
-  { param: 'query', value: 'react' },
-  { param: 'query', value: 'angular' },
-  { param: 'query', value: 'nextjs' },
-  { param: 'query', value: 'typescript' },
-];
+function buildQueries(config: AppConfig): Array<{ param: string; value: string }> {
+  const queries: Array<{ param: string; value: string }> = [];
+  const addedValues = new Set<string>();
+
+  // // Map jobTitle entries to YC role_type values
+  // const hasFrontend = config.filters.jobTitle.some((t) => /^front[- ]?end$/i.test(t));
+  // const hasFullstack = config.filters.jobTitle.some((t) => /^full[- ]?stack$/i.test(t));
+
+  // if (hasFrontend) {
+  //   queries.push({ param: 'role_type', value: 'fe' });
+  //   addedValues.add('fe');
+  // }
+  // if (hasFullstack) {
+  //   queries.push({ param: 'role_type', value: 'fs' });
+  //   addedValues.add('fs');
+  // }
+
+  // Add skill queries (skip role words already covered by role_type)
+  const roleWords = new Set(config.filters.jobTitle.map((t) => t.toLowerCase()));
+  for (const skill of config.filters.skills) {
+    const normalized = skill.toLowerCase();
+    if (roleWords.has(normalized)) continue;
+    if (addedValues.has(normalized)) continue;
+    queries.push({ param: 'query', value: skill });
+    addedValues.add(normalized);
+  }
+
+  return queries;
+}
 
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -50,6 +71,7 @@ interface RawJobData {
 
 export async function scrapeYCombinator(
   browser: Browser,
+  config: AppConfig,
   onProgress?: (newJobs: RawJob[]) => void,
 ): Promise<ScrapeResult> {
   const jobs: RawJob[] = [];
@@ -118,8 +140,11 @@ export async function scrapeYCombinator(
     return { source: SOURCE, jobs, errors };
   }
 
+  const queries = buildQueries(config);
+  const jobsPerCombination = config.scraping.maxJobs;
+
   // --- Scrape each query combination ---
-  for (const { param, value } of QUERIES) {
+  for (const { param, value } of queries) {
     const url = `${BASE_COMPANIES_URL}&${param}=${encodeURIComponent(value)}`;
 
     try {
@@ -147,7 +172,7 @@ export async function scrapeYCombinator(
           (cardsSel: string) => document.querySelectorAll(cardsSel).length,
           SEL.companyCards,
         );
-        if (count >= JOBS_PER_COMBINATION) break;
+        if (count >= jobsPerCombination) break;
         if (i > 0 && count === prevCount) break; // no new content loaded
         prevCount = count;
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
@@ -185,7 +210,7 @@ export async function scrapeYCombinator(
         },
         SEL,
         'https://www.workatastartup.com',
-        JOBS_PER_COMBINATION,
+        jobsPerCombination,
       );
 
       const batchJobs: RawJob[] = [];
