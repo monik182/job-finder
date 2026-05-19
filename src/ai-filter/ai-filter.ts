@@ -24,11 +24,14 @@ async function withConcurrencyLimit<T>(
   return results;
 }
 
-function parseAIResponse(text: string): { match: 'strong' | 'weak'; reason: string } | null {
-  const isValidResponse = (parsed: unknown): parsed is { match: 'strong' | 'weak'; reason: string } => {
+function parseAIResponse(text: string): { match: 'strong' | 'weak' | 'excluded'; reason: string } | null {
+  const isValidResponse = (parsed: unknown): parsed is { match: 'strong' | 'weak' | 'excluded'; reason: string } => {
     if (!parsed || typeof parsed !== 'object') return false;
     const p = parsed as Record<string, unknown>;
-    return (p['match'] === 'strong' || p['match'] === 'weak') && typeof p['reason'] === 'string';
+    return (
+      (p['match'] === 'strong' || p['match'] === 'weak' || p['match'] === 'excluded') &&
+      typeof p['reason'] === 'string'
+    );
   };
 
   // Try direct JSON parse first
@@ -42,7 +45,7 @@ function parseAIResponse(text: string): { match: 'strong' | 'weak'; reason: stri
   }
 
   // Try regex extraction of JSON block
-  const match = /\{[^{}]*"match"\s*:\s*"(strong|weak)"[^{}]*\}/.exec(text);
+  const match = /\{[^{}]*"match"\s*:\s*"(strong|weak|excluded)"[^{}]*\}/.exec(text);
   if (match?.[0]) {
     try {
       const parsed = JSON.parse(match[0]) as unknown;
@@ -66,19 +69,27 @@ async function classifyJob(
 ): Promise<AIClassifiedJob> {
   const skills = config.filters.skills.join(', ');
   const jobTitles = config.filters.jobTitle.join(', ');
+  const allowedLanguages = config.filters.language.join(', ');
   const desc = job.description.slice(0, 400);
 
-  const prompt = `You are a job relevance classifier. A user is looking for remote ${jobTitles} roles with skills: ${skills}.
+  const prompt = `You are a job relevance classifier. Evaluate this job listing on two criteria.
 
-Classify this job as "strong" or "weak":
-- "strong": the role is primarily a ${jobTitles} position where ${skills} are central to the work
-- "weak": the role passed keyword filters but is actually a backend, DevOps, data, QA, or other role where the target skills appear only incidentally
+CRITERIA 1 — Language:
+Allowed languages: ${allowedLanguages}
+- If the job post itself is written in a language other than [${allowedLanguages}], classify as "excluded".
+- If the job post requires the candidate to speak a language other than [${allowedLanguages}] (even if the post is in English), classify as "excluded".
+- A job that requires English OR Spanish (or both) is acceptable.
+
+CRITERIA 2 — Role relevance (only apply if not excluded by criteria 1):
+The user is looking for remote ${jobTitles} roles using: ${skills}.
+- "strong": the role is primarily a ${jobTitles} position where ${skills} are central to the work.
+- "weak": the role passed keyword filters but is actually a backend, DevOps, data, QA, or other role where the target skills appear only incidentally.
 
 Title: ${job.title}
 Company: ${job.company}
 Description: ${desc}
 
-Respond with JSON only: {"match": "strong" | "weak", "reason": "<one sentence>"}`;
+Respond with JSON only: {"match": "strong" | "weak" | "excluded", "reason": "<one sentence>"}`;
 
   try {
     const message = await client.messages.create({
@@ -125,7 +136,8 @@ export async function classifyJobs(
 
   const strong = results.filter((j) => j.aiMatch === 'strong').length;
   const weak = results.filter((j) => j.aiMatch === 'weak').length;
-  console.log(`[ai-filter] Done: ${strong} strong, ${weak} weak`);
+  const excluded = results.filter((j) => j.aiMatch === 'excluded').length;
+  console.log(`[ai-filter] Done: ${strong} strong, ${weak} weak, ${excluded} excluded (language)`);
 
   return results;
 }

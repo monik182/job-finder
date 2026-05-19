@@ -28,6 +28,7 @@
     "prioritySalary": {
       "hourMin": 40,
       "annualMin": 80000
-    }
+    },
+    "language": ["english", "spanish"]
   }
 }

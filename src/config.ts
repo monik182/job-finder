@@ -44,6 +44,7 @@ export interface FiltersConfig {
   salary: SalaryConfig;
   prioritySalary: PrioritySalaryConfig;
   contractTypes: ContractType[];
+  language: string[];
 }
 
 export interface AppConfig {

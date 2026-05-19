@@ -88,7 +88,8 @@ async function main(): Promise<void> {
     const classifiedJobs = await classifyJobs(newJobs, config);
     const strongJobs = classifiedJobs.filter((j) => j.aiMatch === 'strong');
     const weakJobs = classifiedJobs.filter((j) => j.aiMatch === 'weak');
-    console.log(`[main] AI classification: ${strongJobs.length} strong, ${weakJobs.length} weak`);
+    const aiExcluded = classifiedJobs.filter((j) => j.aiMatch === 'excluded').length;
+    console.log(`[main] AI classification: ${strongJobs.length} strong, ${weakJobs.length} weak, ${aiExcluded} excluded`);
 
     function groupBySource(jobs: AIClassifiedJob[]): Partial<Record<JobSource, AIClassifiedJob[]>> {
       const map: Partial<Record<JobSource, AIClassifiedJob[]>> = {};

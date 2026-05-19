@@ -16,7 +16,7 @@ export interface FilteredJob extends RawJob {
   priorityReasons: string[];
 }
 
-export type AIMatch = 'strong' | 'weak';
+export type AIMatch = 'strong' | 'weak' | 'excluded';
 
 export interface AIClassifiedJob extends FilteredJob {
   aiMatch: AIMatch;
