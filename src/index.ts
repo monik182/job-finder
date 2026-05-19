@@ -49,10 +49,11 @@ async function main(): Promise<void> {
     // try { results.push(await scrapeAnywhereRemote(browser)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
 
     console.log('\n[main] Scraping Work at a Startup (YC)...');
-    try { results.push(await scrapeYCombinator(browser)); } catch (e) { console.error('[main] YCombinator failed:', e); }
+    //TODO: Fix the broken scraper issue.
+    // try { results.push(await scrapeYCombinator(browser)); } catch (e) { console.error('[main] YCombinator failed:', e); }
 
     console.log('\n[main] Scraping LinkedIn...');
-    // try { results.push(await scrapeLinkedIn(browser)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
+    try { results.push(await scrapeLinkedIn(browser)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
 
     const allRawJobs = results.flatMap((r) => r.jobs);
     results.forEach((r) => allErrors.push(...r.errors));

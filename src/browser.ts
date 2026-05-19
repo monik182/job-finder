@@ -1,5 +1,21 @@
 import puppeteer, { type Browser } from 'puppeteer-core';
 
+// macOS path to Chrome — adjust if Chrome is installed elsewhere
+const LOCAL_CHROME_PATH = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+function isHeaded(): boolean {
+  return process.env['HEADED'] === 'true';
+}
+
+async function launchLocal(): Promise<Browser> {
+  return puppeteer.launch({
+    headless: false,
+    executablePath: LOCAL_CHROME_PATH,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    slowMo: 30, // slight slow-motion so actions are visible
+  });
+}
+
 function getBrowserlessEndpoint(): string {
   const key = process.env['BROWSERLESS_API_KEY'];
   if (!key) throw new Error('BROWSERLESS_API_KEY environment variable is not set');
@@ -7,11 +23,15 @@ function getBrowserlessEndpoint(): string {
 }
 
 async function connectOnce(): Promise<Browser> {
-  const endpoint = getBrowserlessEndpoint();
-  return puppeteer.connect({ browserWSEndpoint: endpoint });
+  return puppeteer.connect({ browserWSEndpoint: getBrowserlessEndpoint() });
 }
 
 export async function getBrowser(): Promise<Browser> {
+  if (isHeaded()) {
+    console.log('[browser] Launching local headed Chrome…');
+    return launchLocal();
+  }
+
   try {
     return await connectOnce();
   } catch (firstError) {
@@ -23,8 +43,12 @@ export async function getBrowser(): Promise<Browser> {
 
 export async function closeBrowser(browser: Browser): Promise<void> {
   try {
-    await browser.disconnect();
+    if (isHeaded()) {
+      await browser.close();
+    } else {
+      await browser.disconnect();
+    }
   } catch {
-    // ignore disconnect errors
+    // ignore
   }
 }
