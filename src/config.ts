@@ -41,6 +41,7 @@ export interface FiltersConfig {
   excludeOnSite: boolean;
   excludeHybrid: boolean;
   excludeEquityOnly: boolean;
+  excludeCrypto: boolean;
   remote: boolean;
   salary: SalaryConfig;
   prioritySalary: PrioritySalaryConfig;

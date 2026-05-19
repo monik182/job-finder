@@ -26,6 +26,8 @@ const EXCLUDE_UAE =
   /\b(UAE|united\s+arab\s+emirates|dubai|abu\s+dhabi|sharjah|ajman|ras\s+al[- ]khaimah|fujairah|umm\s+al[- ]quwain|gulf|GCC|saudi\s+arabia|riyadh|jeddah|qatar|doha|kuwait|bahrain|oman|muscat)\b/i;
 const EXCLUDE_SEA =
   /\b(vietnam|viet\s*nam|ho\s+chi\s+minh|hanoi|da\s+nang|thailand|bangkok|chiang\s+mai|indonesia|jakarta|bali|surabaya|bandung|philippines|philippine|manila|cebu|malaysia|kuala\s+lumpur|penang|johor|myanmar|burma|yangon|mandalay|cambodia|phnom\s+penh|laos|vientiane|singapore|brunei|timor|southeast\s+asia|south[- ]east\s+asia|sea\s+region)\b|₫|₱|(?<!\w)RM\s*\d|S\$\d/i;
+const EXCLUDE_CRYPTO =
+  /\b(crypto|cryptocurrency|cryptocurrencies|blockchain|defi|de-fi|decentralized\s+finance|web3|web\s*3\.0|nft|nfts|non[- ]fungible|token|tokenized|smart\s+contract|solidity|ethereum|bitcoin|btc|eth|usdt|usdc|bnb|solana|sol|doge|dogecoin|litecoin|ltc|ripple|xrp|cardano|ada|polkadot|dot|avalanche|avax|chainlink|link|uniswap|aave|compound|dao|dapp|dapps|metaverse|play[- ]to[- ]earn|gamefi|depin|layer[- ]?[12]|l1|l2|evm|evm[- ]compatible|on[- ]?chain|off[- ]?chain|staking|yield\s+farm|liquidity\s+pool|wallet\s+connect|metamask|coinbase\s+wallet)\b/i;
 const EXCLUDE_EQUITY_ONLY =
   /\b(equity[- ]?only|pure[- ]?equity|equity[- ]?based\s+compensation|compensation[:\s]+equity|equity\s+compensation\s+only|stock[- ]?options?\s+only|no\s+(?:cash\s+)?salary|unpaid|volunteer)\b/i;
 const INCLUDE_REMOTE = /\bremote\b/i;
@@ -204,6 +206,7 @@ export function filterJobs(jobs: RawJob[], config: AppConfig): FilterResult {
 
     if (excludeSkillsRegex?.test(combined)) exclusionReasons.push('excluded-skill');
     if (filters.excludeEquityOnly && EXCLUDE_EQUITY_ONLY.test(combined)) exclusionReasons.push('equity-only');
+    if (filters.excludeCrypto && EXCLUDE_CRYPTO.test(fullText)) exclusionReasons.push('crypto');
 
     // ── Pass 2: Required inclusions ────────────────────────────────────────
     const skillsMatch = skillsRegex.test(combined);
