@@ -33,8 +33,11 @@ function jobCard(job: AIClassifiedJob, showAiReason = false): string {
     )
     .join('');
 
-  const descHtml = job.description
-    ? `<p style="margin:6px 0 0;color:#64748b;font-size:13px;line-height:1.5;">${escapeHtml(job.description)}</p>`
+  const descTrimmed = job.description
+    ? job.description.split(/\s+/).slice(0, 100).join(' ') + (job.description.split(/\s+/).length > 100 ? '…' : '')
+    : '';
+  const descHtml = descTrimmed
+    ? `<p style="margin:6px 0 0;color:#64748b;font-size:13px;line-height:1.5;">${escapeHtml(descTrimmed)}</p>`
     : '';
 
   const aiReasonHtml =
