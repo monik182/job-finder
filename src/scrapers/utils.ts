@@ -25,6 +25,7 @@ export async function safeGoto(
 ): Promise<boolean> {
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+    await page.waitForNavigation({ timeout: 10_000 });
     return true;
   } catch (err) {
     console.error(`[scraper] Failed to load ${url}:`, err instanceof Error ? err.message : err);

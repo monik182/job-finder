@@ -5,6 +5,7 @@ import { type Browser, type Page, type CookieParam } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
 import { type AppConfig, type GeoLocation, type ExperienceLevel, type ContractType, getSearchTerms } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
+import { getBrowser } from '../browser.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const COOKIES_PATH = resolve(__dirname, '..', '..', 'linkedin-cookies.json');
@@ -138,11 +139,43 @@ export async function scrapeLinkedIn(
     };
   }
 
-  const page = await newPage(browser);
+  let currentBrowser = browser;
+  let page = await newPage(currentBrowser);
 
   // ── Auth: try saved cookies first, fall back to login ────────────────────
 
   let loginSucceeded = false;
+  let activeCookies: Awaited<ReturnType<typeof page.cookies>> | null = null;
+
+  async function recoverPage(): Promise<boolean> {
+    console.warn('[linkedin] Page died — attempting recovery…');
+    try {
+      try { await page.close(); } catch { /* already dead */ }
+
+      // Try creating a new page on the existing browser first
+      try {
+        page = await newPage(currentBrowser);
+      } catch {
+        // Browser session is dead — reconnect entirely
+        console.warn('[linkedin] Browser disconnected — reconnecting…');
+        currentBrowser = await getBrowser();
+        page = await newPage(currentBrowser);
+      }
+
+      if (activeCookies) {
+        await page.setCookie(...activeCookies);
+        const ok = await safeGoto(page, 'https://www.linkedin.com/feed/', 15_000);
+        if (ok && !isAuthWall(page.url())) {
+          console.log('[linkedin] Recovery successful');
+          await delay(randomInt(1500, 2500), randomInt(1500, 2500));
+          return true;
+        }
+      }
+    } catch (e) {
+      console.error('[linkedin] Recovery failed:', e instanceof Error ? e.message : String(e));
+    }
+    return false;
+  }
 
   const savedCookies = loadCookies();
   if (savedCookies) {
@@ -152,6 +185,7 @@ export async function scrapeLinkedIn(
     if (ok && !isAuthWall(page.url())) {
       console.log('[linkedin] Cookie auth successful');
       loginSucceeded = true;
+      activeCookies = await page.cookies();
       await delay(randomInt(1500, 2500), randomInt(1500, 2500));
     } else {
       console.warn('[linkedin] Cookies expired or invalid — falling back to login');
@@ -212,6 +246,7 @@ export async function scrapeLinkedIn(
         loginSucceeded = true;
         console.log(`[linkedin] Login successful${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
         await saveCookies(page);
+        activeCookies = await page.cookies();
         await delay(randomInt(2000, 3500), randomInt(2000, 3500));
         break;
       } catch (err) {
@@ -249,160 +284,172 @@ export async function scrapeLinkedIn(
         const searchUrl = buildUrl(keyword, geo.id, fixedParams);
         console.log(`[linkedin] Scraping "${keyword}" / ${exp} in ${geo.label}…`);
 
-      try {
-        const ok = await safeGoto(page, searchUrl, 30_000);
-        if (!ok) {
-          errors.push(`[linkedin] Failed to load: ${searchUrl}`);
-          continue;
-        }
-
-        if (isAuthWall(page.url())) {
-          const msg = `[linkedin] Auth wall hit for "${keyword}" in ${geo.label} — stopping`;
-          console.warn(msg);
-          errors.push(msg);
-          await page.close();
-          return { source: SOURCE, jobs, errors };
-        }
-
-        await moveMouse(page);
-        await delay(minWait, minWait + 2000);
-
-        let jobsThisSearch = 0;
-        const batchJobs: RawJob[] = [];
-
-        for (let pageNum = 0; pageNum < maxPages && jobsThisSearch < maxJobsPerSearch; pageNum++) {
-          // Wait for the job list to render
-          try {
-            await page.waitForSelector(SEL.jobListItems, { timeout: 15_000 });
-          } catch {
-            console.warn(`[linkedin] No job list for "${keyword}" in ${geo.label}, page ${pageNum + 1}`);
-            break;
+        try {
+          const ok = await safeGoto(page, searchUrl, 30_000);
+          if (!ok) {
+            errors.push(`[linkedin] Failed to load: ${searchUrl}`);
+            continue;
           }
 
-          // Scroll within the list panel to trigger lazy-loading
-          await page.evaluate(() => {
-            const listPanel = document.querySelector<HTMLElement>('div.scaffold-layout__list');
-            if (listPanel) listPanel.scrollTop += 600;
-            else window.scrollBy(0, 400);
-          });
-          await delay(randomInt(1200, 2200), randomInt(1200, 2200));
+          if (isAuthWall(page.url())) {
+            const msg = `[linkedin] Auth wall hit for "${keyword}" in ${geo.label} — stopping`;
+            console.warn(msg);
+            errors.push(msg);
+            await page.close();
+            return { source: SOURCE, jobs, errors };
+          }
+
           await moveMouse(page);
+          await delay(minWait, minWait + 2000);
 
-          const jobItems = await page.$$(SEL.jobListItems);
+          let jobsThisSearch = 0;
+          const batchJobs: RawJob[] = [];
 
-          for (const item of jobItems) {
-            if (jobsThisSearch >= maxJobsPerSearch) break;
-
-            // Only process items that contain a job card (have a data-job-id somewhere)
-            const isJobCard = await item.evaluate((el) =>
-              !!(el.querySelector('[data-job-id]') || el.getAttribute('data-occludable-job-id')),
-            );
-            if (!isJobCard) continue;
-
-            // Grab date from the time element before clicking
-            const dateIso = await item.evaluate((el) => {
-              const t = el.querySelector('time');
-              return t?.getAttribute('datetime') ?? t?.textContent?.trim() ?? '';
-            });
-
-            // Scroll item into view and pause before clicking
-            await item.evaluate((el) => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-            await delay(randomInt(400, 900), randomInt(400, 900));
-            await moveMouse(page);
-            await delay(randomInt(300, 600), randomInt(300, 600));
-
+          for (let pageNum = 0; pageNum < maxPages && jobsThisSearch < maxJobsPerSearch; pageNum++) {
+            // Wait for the job list to render
             try {
-              await item.click();
+              await page.waitForSelector(SEL.jobListItems, { timeout: 15_000 });
             } catch {
-              continue;
-            }
-
-            // Wait for detail panel to populate
-            await delay(randomInt(1500, 2800), randomInt(1500, 2800));
-            await moveMouse(page);
-
-            try {
-              await page.waitForSelector(SEL.detailTitle, { timeout: 10_000 });
-            } catch {
-              continue; // detail didn't load — skip
-            }
-
-            // Extract from detail panel
-            const jobData = await page.evaluate(
-              (selectors: typeof SEL, baseUrl: string) => {
-                const titleEl = document.querySelector<HTMLAnchorElement>(selectors.detailTitle);
-                const title = titleEl?.textContent?.trim() ?? '';
-                const href = titleEl?.getAttribute('href') ?? '';
-                const url = href.startsWith('http') ? href : `${baseUrl}${href}`;
-
-                const company =
-                  document.querySelector(selectors.detailCompany)?.textContent?.trim() ?? '';
-                const location =
-                  document.querySelector(selectors.detailLocation)?.textContent?.trim() ?? '';
-                const description =
-                  document.querySelector(selectors.detailDescription)?.textContent?.trim().slice(0, 3000) ?? '';
-
-                return { title, url, company, location, description };
-              },
-              SEL,
-              LI_BASE_URL,
-            );
-
-            if (!jobData.title || !jobData.url) continue;
-            if (seenUrls.has(jobData.url)) continue;
-            seenUrls.add(jobData.url);
-
-            const job: RawJob = {
-              title: jobData.title,
-              company: jobData.company,
-              location: jobData.location,
-              datePosted: parseRelativeDate(dateIso),
-              url: jobData.url,
-              description: jobData.description,
-              source: SOURCE,
-              scrapedAt,
-            };
-            jobs.push(job);
-            batchJobs.push(job);
-
-            jobsThisSearch++;
-            console.log(`[linkedin]   ✓ "${jobData.title}" @ "${jobData.company}"`);
-          }
-
-          // Paginate if more pages remain
-          if (pageNum < maxPages - 1 && jobsThisSearch < maxJobsPerSearch) {
-            try {
-              await page.evaluate((sel: string) => {
-                document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }, SEL.paginationContainer);
-
-              await delay(randomInt(1000, 2000), randomInt(1000, 2000));
-              await moveMouse(page);
-
-              const nextBtn = await page.$(SEL.paginationNext);
-              if (!nextBtn) break;
-
-              await nextBtn.click();
-              await delay(minWait, minWait + 2000);
-            } catch {
+              console.warn(`[linkedin] No job list for "${keyword}" in ${geo.label}, page ${pageNum + 1}`);
               break;
             }
+
+            // Scroll within the list panel to trigger lazy-loading
+            await page.evaluate(() => {
+              const listPanel = document.querySelector<HTMLElement>('div.scaffold-layout__list');
+              if (listPanel) listPanel.scrollTop += 600;
+              else window.scrollBy(0, 400);
+            });
+            await delay(randomInt(1200, 2200), randomInt(1200, 2200));
+            await moveMouse(page);
+
+            const jobItems = await page.$$(SEL.jobListItems);
+
+            for (const item of jobItems) {
+              if (jobsThisSearch >= maxJobsPerSearch) break;
+
+              // Only process items that contain a job card (have a data-job-id somewhere)
+              let isJobCard = false;
+              try {
+                isJobCard = await item.evaluate((el) =>
+                  !!(el.querySelector('[data-job-id]') || el.getAttribute('data-occludable-job-id')),
+                );
+              } catch { continue; }
+              if (!isJobCard) continue;
+
+              // Grab date from the time element before clicking
+              let dateIso = '';
+              try {
+                dateIso = await item.evaluate((el) => {
+                  const t = el.querySelector('time');
+                  return t?.getAttribute('datetime') ?? t?.textContent?.trim() ?? '';
+                });
+              } catch { /* best-effort */ }
+
+              // Scroll item into view and pause before clicking
+              try {
+                await item.evaluate((el) => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+              } catch { continue; }
+              await delay(randomInt(400, 900), randomInt(400, 900));
+              await moveMouse(page);
+              await delay(randomInt(300, 600), randomInt(300, 600));
+
+              try {
+                await item.click();
+              } catch {
+                continue;
+              }
+
+              // Wait for detail panel to populate
+              await delay(randomInt(1500, 2800), randomInt(1500, 2800));
+              await moveMouse(page);
+
+              try {
+                await page.waitForSelector(SEL.detailTitle, { timeout: 10_000 });
+              } catch {
+                continue; // detail didn't load — skip
+              }
+
+              // Extract from detail panel
+              const jobData = await page.evaluate(
+                (selectors: typeof SEL, baseUrl: string) => {
+                  const titleEl = document.querySelector<HTMLAnchorElement>(selectors.detailTitle);
+                  const title = titleEl?.textContent?.trim() ?? '';
+                  const href = titleEl?.getAttribute('href') ?? '';
+                  const url = href.startsWith('http') ? href : `${baseUrl}${href}`;
+
+                  const company =
+                    document.querySelector(selectors.detailCompany)?.textContent?.trim() ?? '';
+                  const location =
+                    document.querySelector(selectors.detailLocation)?.textContent?.trim() ?? '';
+                  const description =
+                    document.querySelector(selectors.detailDescription)?.textContent?.trim().slice(0, 3000) ?? '';
+
+                  return { title, url, company, location, description };
+                },
+                SEL,
+                LI_BASE_URL,
+              );
+
+              if (!jobData.title || !jobData.url) continue;
+              if (seenUrls.has(jobData.url)) continue;
+              seenUrls.add(jobData.url);
+
+              const job: RawJob = {
+                title: jobData.title,
+                company: jobData.company,
+                location: jobData.location,
+                datePosted: parseRelativeDate(dateIso),
+                url: jobData.url,
+                description: jobData.description,
+                source: SOURCE,
+                scrapedAt,
+              };
+              jobs.push(job);
+              batchJobs.push(job);
+
+              jobsThisSearch++;
+              console.log(`[linkedin]   ✓ "${jobData.title}" @ "${jobData.company}"`);
+            }
+
+            // Paginate if more pages remain
+            if (pageNum < maxPages - 1 && jobsThisSearch < maxJobsPerSearch) {
+              try {
+                await page.evaluate((sel: string) => {
+                  document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, SEL.paginationContainer);
+
+                await delay(randomInt(1000, 2000), randomInt(1000, 2000));
+                await moveMouse(page);
+
+                const nextBtn = await page.$(SEL.paginationNext);
+                if (!nextBtn) break;
+
+                await nextBtn.click();
+                await delay(minWait, minWait + 2000);
+              } catch {
+                break;
+              }
+            }
+          }
+
+          if (batchJobs.length > 0) onProgress?.(batchJobs);
+          console.log(`[linkedin] "${keyword}" / ${exp} in ${geo.label}: ${jobsThisSearch} jobs`);
+        } catch (err) {
+          const msg = `[linkedin] Error on "${keyword}" / ${exp} in ${geo.label}: ${err instanceof Error ? err.message : String(err)}`;
+          console.error(msg);
+          errors.push(msg);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (page.isClosed() || /Target closed|detached Frame|Session closed/i.test(errMsg)) {
+            const recovered = await recoverPage();
+            if (!recovered) {
+              console.warn('[linkedin] Recovery failed — stopping scrape');
+              return { source: SOURCE, jobs, errors };
+            }
           }
         }
 
-        if (batchJobs.length > 0) onProgress?.(batchJobs);
-        console.log(`[linkedin] "${keyword}" / ${exp} in ${geo.label}: ${jobsThisSearch} jobs`);
-      } catch (err) {
-        const msg = `[linkedin] Error on "${keyword}" / ${exp} in ${geo.label}: ${err instanceof Error ? err.message : String(err)}`;
-        console.error(msg);
-        errors.push(msg);
-        if (page.isClosed()) {
-          console.warn('[linkedin] Page is closed — stopping scrape');
-          return { source: SOURCE, jobs, errors };
-        }
-      }
-
-      await delay(Math.max(minWait, 3000), Math.max(minWait, 6000));
+        await delay(Math.max(minWait, 3000), Math.max(minWait, 6000));
       }
 
       await delay(Math.max(minWait, 5000), Math.max(minWait, 9000));
@@ -412,7 +459,7 @@ export async function scrapeLinkedIn(
     await delay(Math.max(minWait, 8000), Math.max(minWait, 12000));
   }
 
-  await page.close();
+  try { await page.close(); } catch { /* ignore */ }
   console.log(`[linkedin] Total: ${jobs.length} jobs (${seenUrls.size} unique)`);
   return { source: SOURCE, jobs, errors };
 }

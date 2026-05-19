@@ -59,11 +59,11 @@ function buildJobsUrl(config: AppConfig, skill: string): string {
   const locationParam = config.filters.remote
     ? 'anywhere'
     : (() => {
-        const locations = [...new Set(
-          config.filters.geoLocations.flatMap((geo) => GEO_MAP[geo] ?? []),
-        )];
-        return locations.length > 0 ? locations.join(',') : 'anywhere';
-      })();
+      const locations = [...new Set(
+        config.filters.geoLocations.flatMap((geo) => GEO_MAP[geo] ?? []),
+      )];
+      return locations.length > 0 ? locations.join(',') : 'anywhere';
+    })();
 
   // Collect unique experience param values
   const experienceValues = [...new Set(
@@ -116,7 +116,7 @@ export async function scrapeWorkingNomads(
       const ok = await safeGoto(page, url);
       if (!ok) {
         errors.push(`[working-nomads] Failed to load page for skill "${skill}": ${url}`);
-        await page.close();
+        // await page.close();
         continue;
       }
 
@@ -125,7 +125,7 @@ export async function scrapeWorkingNomads(
         await page.waitForSelector(SEL.jobsList, { timeout: 15_000 });
       } catch {
         errors.push(`[working-nomads] Job list not found for skill "${skill}"`);
-        await page.close();
+        // await page.close();
         continue;
       }
 
