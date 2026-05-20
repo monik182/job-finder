@@ -18,6 +18,8 @@ export function delay(min = 2000, max = 5000): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const FATAL_NAV_ERRORS = /detached Frame|Session closed|Target closed|Connection closed/i;
+
 export async function safeGoto(
   page: Page,
   url: string,
@@ -25,10 +27,12 @@ export async function safeGoto(
 ): Promise<boolean> {
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
-    await page.waitForNavigation({ timeout: 10_000 });
     return true;
   } catch (err) {
-    console.error(`[scraper] Failed to load ${url}:`, err instanceof Error ? err.message : err);
+    const msg = err instanceof Error ? err.message : String(err);
+    // Re-throw fatal errors so callers with recovery logic can handle them
+    if (FATAL_NAV_ERRORS.test(msg)) throw err;
+    console.error(`[scraper] Failed to load ${url}:`, msg);
     return false;
   }
 }

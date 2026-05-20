@@ -204,7 +204,7 @@ export async function scrapeAnywhereRemote(
           );
           jobs.push(...newJobs);
         } finally {
-          // await page.close().catch(() => {});
+          await page.close().catch(() => {});
         }
       }
     }

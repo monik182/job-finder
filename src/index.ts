@@ -43,22 +43,20 @@ async function main(): Promise<void> {
   console.log(`[main] Config loaded — skills: [${config.filters.skills.join(', ')}], geo: [${config.filters.geoLocations.join(', ')}]`);
 
   const startedAt = new Date().toISOString();
-  let browser = await getBrowser();
-  console.log('[main] Connected to browser');
 
   const allErrors: string[] = [];
 
-  async function ensureBrowser(): Promise<typeof browser> {
-    if (!browser.connected) {
-      console.warn('[main] Browser disconnected — reconnecting…');
-      browser = await getBrowser();
-      console.log('[main] Reconnected');
+  async function withFreshBrowser<T>(fn: (browser: Awaited<ReturnType<typeof getBrowser>>) => Promise<T>): Promise<T> {
+    const browser = await getBrowser();
+    try {
+      return await fn(browser);
+    } finally {
+      await closeBrowser(browser);
     }
-    return browser;
   }
 
   try {
-    // Scrape in order: safest first, riskiest (LinkedIn) last
+    // Scrape in order: each scraper gets its own fresh browser session
     const results: ScrapeResult[] = [];
     const allRawJobs: RawJob[] = [];
 
@@ -68,16 +66,16 @@ async function main(): Promise<void> {
     };
 
     console.log('\n[main] Scraping LinkedIn...');
-    try { results.push(await scrapeLinkedIn(await ensureBrowser(), config, checkpoint)); } catch (e) { console.error('[main] LinkedIn failed:', e); }
+    try { results.push(await withFreshBrowser((b) => scrapeLinkedIn(b, config, checkpoint))); } catch (e) { console.error('[main] LinkedIn failed:', e); }
 
     console.log('\n[main] Scraping Anywhere Remote Jobs...');
-    try { results.push(await scrapeAnywhereRemote(await ensureBrowser(), config, checkpoint)); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
+    try { results.push(await withFreshBrowser((b) => scrapeAnywhereRemote(b, config, checkpoint))); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
 
     console.log('\n[main] Scraping Working Nomads...');
-    try { results.push(await scrapeWorkingNomads(await ensureBrowser(), config, checkpoint)); } catch (e) { console.error('[main] Working Nomads failed:', e); }
+    try { results.push(await withFreshBrowser((b) => scrapeWorkingNomads(b, config, checkpoint))); } catch (e) { console.error('[main] Working Nomads failed:', e); }
 
     console.log('\n[main] Scraping Work at a Startup (YC)...');
-    try { results.push(await scrapeYCombinator(await ensureBrowser(), config, checkpoint)); } catch (e) { console.error('[main] YCombinator failed:', e); }
+    try { results.push(await withFreshBrowser((b) => scrapeYCombinator(b, config, checkpoint))); } catch (e) { console.error('[main] YCombinator failed:', e); }
 
     results.forEach((r) => allErrors.push(...r.errors));
 
@@ -178,7 +176,7 @@ async function main(): Promise<void> {
 
     console.log('\n=== Job Finder complete ===');
   } finally {
-    await closeBrowser(browser);
+    // browsers are closed inside withFreshBrowser
   }
 }
 
