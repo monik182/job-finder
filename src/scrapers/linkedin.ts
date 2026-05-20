@@ -5,7 +5,7 @@ import { type Browser, type Page, type CookieParam } from 'puppeteer-core';
 import { type RawJob, type ScrapeResult } from '../types.js';
 import { type AppConfig, type GeoLocation, type ExperienceLevel, type ContractType, getSearchTerms } from '../config.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
-import { getBrowser } from '../browser.js';
+import { getBrowser, closeBrowser } from '../browser.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const COOKIES_PATH = resolve(__dirname, '..', '..', 'linkedin-cookies.json');
@@ -98,11 +98,20 @@ const SEL = {
   paginationNext: 'button.jobs-search-pagination__button.jobs-search-pagination__button--next',
 } as const;
 
+const HEADED = process.env['HEADED'] === 'true';
+
 function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+/** Capped delay — in headless mode, max 1s. In headed mode, uses the original range. */
+function liDelay(min: number, max: number): Promise<void> {
+  if (!HEADED) return delay(Math.min(min, 500), Math.min(max, 1000));
+  return delay(min, max);
+}
+
 async function moveMouse(page: Page): Promise<void> {
+  if (!HEADED) return; // skip in headless — no human to simulate
   try {
     const x = randomInt(200, 1100);
     const y = randomInt(100, 700);
@@ -117,6 +126,26 @@ function buildUrl(keyword: string, geoId: string, fixedParams: Record<string, st
 
 function isAuthWall(url: string): boolean {
   return url.includes('/login') || url.includes('/checkpoint') || url.includes('/authwall');
+}
+
+/** Check whether the page is still usable (not closed, frame not detached). */
+function isPageAlive(page: Page): boolean {
+  try {
+    if (page.isClosed()) return false;
+    // Accessing mainFrame() will throw if the frame is detached
+    const frame = page.mainFrame();
+    // A detached frame has no execution context — url() can still work but
+    // evaluate() won't, so we just check the obvious signal.
+    return !frame.detached;
+  } catch {
+    return false;
+  }
+}
+
+/** Returns true if the error message indicates a detached frame / dead session. */
+function isDetachedError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /detached Frame|Target closed|Session closed|Protocol error|frame was detached/i.test(msg);
 }
 
 export async function scrapeLinkedIn(
@@ -147,10 +176,41 @@ export async function scrapeLinkedIn(
   let loginSucceeded = false;
   let activeCookies: Awaited<ReturnType<typeof page.cookies>> | null = null;
 
+  // ── Session refresh helper ───────────────────────────────────────────────
+  // Spins up a fresh Browserless session and restores cookies.
+  // Returns true on success, pushes to `errors` on failure.
+  async function refreshSession(reason: string): Promise<boolean> {
+    console.log(`[linkedin] Refreshing session — ${reason}`);
+    await closeBrowser(currentBrowser);
+    try {
+      currentBrowser = await getBrowser();
+      page = await newPage(currentBrowser);
+      if (activeCookies) {
+        await page.setCookie(...activeCookies);
+        const ok = await safeGoto(page, 'https://www.linkedin.com/feed/', 15_000);
+        if (!ok || isAuthWall(page.url())) {
+          errors.push(`[linkedin] Auth failed after session refresh (${reason})`);
+          return false;
+        }
+        console.log('[linkedin] Session refreshed');
+        await liDelay(randomInt(1000, 2000), randomInt(1000, 2000));
+        return true;
+      }
+      errors.push('[linkedin] No cookies available for session refresh');
+      return false;
+    } catch (e) {
+      errors.push(`[linkedin] Session refresh failed (${reason}): ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  }
+
+  // ── Recovery helper ──────────────────────────────────────────────────────
+  // Tries to get back to a working state after a crash / detached frame.
   async function recoverPage(): Promise<boolean> {
     console.warn('[linkedin] Page died — attempting recovery…');
     try {
-      try { await page.close(); } catch { /* already dead */ }
+      // Timeout page.close() — it can hang indefinitely on detached CDP sessions
+      try { await Promise.race([page.close(), new Promise(r => setTimeout(r, 3000))]); } catch { /* already dead */ }
 
       // Try creating a new page on the existing browser first
       try {
@@ -167,7 +227,7 @@ export async function scrapeLinkedIn(
         const ok = await safeGoto(page, 'https://www.linkedin.com/feed/', 15_000);
         if (ok && !isAuthWall(page.url())) {
           console.log('[linkedin] Recovery successful');
-          await delay(randomInt(1500, 2500), randomInt(1500, 2500));
+          await liDelay(randomInt(1500, 2500), randomInt(1500, 2500));
           return true;
         }
       }
@@ -186,7 +246,7 @@ export async function scrapeLinkedIn(
       console.log('[linkedin] Cookie auth successful');
       loginSucceeded = true;
       activeCookies = await page.cookies();
-      await delay(randomInt(1500, 2500), randomInt(1500, 2500));
+      await liDelay(randomInt(1500, 2500), randomInt(1500, 2500));
     } else {
       console.warn('[linkedin] Cookies expired or invalid — falling back to login');
     }
@@ -200,7 +260,7 @@ export async function scrapeLinkedIn(
       try {
         if (attempt > 1) {
           console.warn(`[linkedin] Retrying login (attempt ${attempt}/${MAX_LOGIN_ATTEMPTS})…`);
-          await delay(randomInt(2000, 4000), randomInt(2000, 4000));
+          await liDelay(randomInt(2000, 4000), randomInt(2000, 4000));
         }
 
         const loginLoaded = await safeGoto(page, LOGIN_URL, 15_000);
@@ -210,17 +270,17 @@ export async function scrapeLinkedIn(
         }
 
         await page.waitForSelector(SEL.emailInput, { timeout: 15_000, visible: true });
-        await delay(randomInt(800, 1500), randomInt(800, 1500));
+        await liDelay(randomInt(800, 1500), randomInt(800, 1500));
         await moveMouse(page);
 
         await page.click(SEL.emailInput);
         await page.type(SEL.emailInput, email, { delay: randomInt(80, 150) });
-        await delay(randomInt(600, 1200), randomInt(600, 1200));
+        await liDelay(randomInt(600, 1200), randomInt(600, 1200));
         await moveMouse(page);
 
         await page.click(SEL.passwordInput);
         await page.type(SEL.passwordInput, password, { delay: randomInt(80, 150) });
-        await delay(randomInt(500, 900), randomInt(500, 900));
+        await liDelay(randomInt(500, 900), randomInt(500, 900));
         await moveMouse(page);
 
         // "Sign in" button
@@ -247,7 +307,7 @@ export async function scrapeLinkedIn(
         console.log(`[linkedin] Login successful${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
         await saveCookies(page);
         activeCookies = await page.cookies();
-        await delay(randomInt(2000, 3500), randomInt(2000, 3500));
+        await liDelay(randomInt(2000, 3500), randomInt(2000, 3500));
         break;
       } catch (err) {
         lastLoginError = `[linkedin] Login error: ${err instanceof Error ? err.message : String(err)}`;
@@ -277,14 +337,43 @@ export async function scrapeLinkedIn(
   const maxJobsPerSearch = config.scraping.maxJobs;
   const minWait = config.scraping.minDelayMs;
 
+  // Track total searches so we know when to refresh (every search gets a fresh session)
+  let searchCount = 0;
+
   for (const geo of geoIds) {
     for (const keyword of getSearchTerms(config)) {
       for (const exp of config.filters.experience) {
+        // ── Refresh session before every search (except the very first) ────
+        // Browserless sessions expire after ~60s. A single search (navigate +
+        // scroll + click jobs + paginate) consumes most of that budget, so we
+        // give each search its own fresh session.
+        if (searchCount > 0) {
+          const ok = await refreshSession(`before "${keyword}" / ${exp} in ${geo.label}`);
+          if (!ok) {
+            // Auth is broken — no point continuing
+            errors.push('[linkedin] Stopping: could not refresh session');
+            try { await page.close(); } catch { /* ignore */ }
+            console.log(`[linkedin] Total: ${jobs.length} jobs (${seenUrls.size} unique)`);
+            return { source: SOURCE, jobs, errors };
+          }
+        }
+        searchCount++;
+
         const fixedParams = buildLinkedInParamsForExp(config, exp);
         const searchUrl = buildUrl(keyword, geo.id, fixedParams);
-        console.log(`[linkedin] Scraping "${keyword}" / ${exp} in ${geo.label}…`);
+        console.log(`[linkedin] Scraping "${keyword}" / ${exp} in ${geo.label}: ${searchUrl}`);
 
         try {
+          // Guard: make sure page is still alive before navigating
+          if (!isPageAlive(page)) {
+            console.warn('[linkedin] Page not alive before navigation — recovering');
+            const recovered = await recoverPage();
+            if (!recovered) {
+              errors.push(`[linkedin] Could not recover before "${keyword}" / ${exp}`);
+              continue;
+            }
+          }
+
           const ok = await safeGoto(page, searchUrl, 30_000);
           if (!ok) {
             errors.push(`[linkedin] Failed to load: ${searchUrl}`);
@@ -295,12 +384,12 @@ export async function scrapeLinkedIn(
             const msg = `[linkedin] Auth wall hit for "${keyword}" in ${geo.label} — stopping`;
             console.warn(msg);
             errors.push(msg);
-            await page.close();
+            try { await page.close(); } catch { /* ignore */ }
             return { source: SOURCE, jobs, errors };
           }
 
           await moveMouse(page);
-          await delay(minWait, minWait + 2000);
+          await liDelay(minWait, minWait + 2000);
 
           let jobsThisSearch = 0;
           const batchJobs: RawJob[] = [];
@@ -315,18 +404,41 @@ export async function scrapeLinkedIn(
             }
 
             // Scroll within the list panel to trigger lazy-loading
-            await page.evaluate(() => {
-              const listPanel = document.querySelector<HTMLElement>('div.scaffold-layout__list');
-              if (listPanel) listPanel.scrollTop += 600;
-              else window.scrollBy(0, 400);
-            });
-            await delay(randomInt(1200, 2200), randomInt(1200, 2200));
+            try {
+              await page.evaluate(() => {
+                const listPanel = document.querySelector<HTMLElement>('div.scaffold-layout__list');
+                if (listPanel) listPanel.scrollTop += 600;
+                else window.scrollBy(0, 400);
+              });
+            } catch (scrollErr) {
+              if (isDetachedError(scrollErr)) {
+                console.warn('[linkedin] Frame detached during scroll — breaking page loop');
+                break;
+              }
+            }
+            await liDelay(randomInt(1200, 2200), randomInt(1200, 2200));
             await moveMouse(page);
 
-            const jobItems = await page.$$(SEL.jobListItems);
+            // Re-query job items fresh each page (never hold stale ElementHandles across waits)
+            let jobItems;
+            try {
+              jobItems = await page.$$(SEL.jobListItems);
+            } catch (queryErr) {
+              if (isDetachedError(queryErr)) {
+                console.warn('[linkedin] Frame detached querying job items — breaking page loop');
+                break;
+              }
+              throw queryErr;
+            }
 
             for (const item of jobItems) {
               if (jobsThisSearch >= maxJobsPerSearch) break;
+
+              // Guard: bail early if the page died mid-iteration
+              if (!isPageAlive(page)) {
+                console.warn('[linkedin] Page died mid-iteration — breaking');
+                break;
+              }
 
               // Only process items that contain a job card (have a data-job-id somewhere)
               let isJobCard = false;
@@ -334,7 +446,11 @@ export async function scrapeLinkedIn(
                 isJobCard = await item.evaluate((el) =>
                   !!(el.querySelector('[data-job-id]') || el.getAttribute('data-occludable-job-id')),
                 );
-              } catch { continue; }
+              } catch (e) {
+                // If the element handle is stale / frame detached, skip this item
+                if (isDetachedError(e)) continue;
+                continue;
+              }
               if (!isJobCard) continue;
 
               // Grab date from the time element before clicking
@@ -349,47 +465,67 @@ export async function scrapeLinkedIn(
               // Scroll item into view and pause before clicking
               try {
                 await item.evaluate((el) => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-              } catch { continue; }
-              await delay(randomInt(400, 900), randomInt(400, 900));
+              } catch (e) {
+                if (isDetachedError(e)) continue;
+                continue;
+              }
+              await liDelay(randomInt(400, 900), randomInt(400, 900));
               await moveMouse(page);
-              await delay(randomInt(300, 600), randomInt(300, 600));
+              await liDelay(randomInt(300, 600), randomInt(300, 600));
 
               try {
                 await item.click();
-              } catch {
+              } catch (e) {
+                if (isDetachedError(e)) {
+                  console.warn('[linkedin] Frame detached on click — breaking item loop');
+                  break;
+                }
                 continue;
               }
 
               // Wait for detail panel to populate
-              await delay(randomInt(1500, 2800), randomInt(1500, 2800));
+              await liDelay(randomInt(1500, 2800), randomInt(1500, 2800));
               await moveMouse(page);
 
               try {
                 await page.waitForSelector(SEL.detailTitle, { timeout: 10_000 });
-              } catch {
+              } catch (e) {
+                if (isDetachedError(e)) {
+                  console.warn('[linkedin] Frame detached waiting for detail — breaking item loop');
+                  break;
+                }
                 continue; // detail didn't load — skip
               }
 
               // Extract from detail panel
-              const jobData = await page.evaluate(
-                (selectors: typeof SEL, baseUrl: string) => {
-                  const titleEl = document.querySelector<HTMLAnchorElement>(selectors.detailTitle);
-                  const title = titleEl?.textContent?.trim() ?? '';
-                  const href = titleEl?.getAttribute('href') ?? '';
-                  const url = href.startsWith('http') ? href : `${baseUrl}${href}`;
+              let jobData;
+              try {
+                jobData = await page.evaluate(
+                  (selectors: typeof SEL, baseUrl: string) => {
+                    const titleEl = document.querySelector<HTMLAnchorElement>(selectors.detailTitle);
+                    const title = titleEl?.textContent?.trim() ?? '';
+                    const href = titleEl?.getAttribute('href') ?? '';
+                    const url = href.startsWith('http') ? href : `${baseUrl}${href}`;
 
-                  const company =
-                    document.querySelector(selectors.detailCompany)?.textContent?.trim() ?? '';
-                  const location =
-                    document.querySelector(selectors.detailLocation)?.textContent?.trim() ?? '';
-                  const description =
-                    document.querySelector(selectors.detailDescription)?.textContent?.trim().slice(0, 3000) ?? '';
+                    const company =
+                      document.querySelector(selectors.detailCompany)?.textContent?.trim() ?? '';
+                    const location =
+                      document.querySelector(selectors.detailLocation)?.textContent?.trim() ?? '';
+                    const description =
+                      document.querySelector(selectors.detailDescription)?.textContent?.trim().slice(0, 3000) ?? '';
 
-                  return { title, url, company, location, description };
-                },
-                SEL,
-                LI_BASE_URL,
-              );
+                    return { title, url, company, location, description };
+                  },
+                  SEL,
+                  LI_BASE_URL,
+                );
+              } catch (e) {
+                if (isDetachedError(e)) {
+                  console.warn('[linkedin] Frame detached during extraction — breaking item loop');
+                  break;
+                }
+                continue;
+              }
 
               if (!jobData.title || !jobData.url) continue;
               if (seenUrls.has(jobData.url)) continue;
@@ -419,15 +555,18 @@ export async function scrapeLinkedIn(
                   document.querySelector(sel)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 }, SEL.paginationContainer);
 
-                await delay(randomInt(1000, 2000), randomInt(1000, 2000));
+                await liDelay(randomInt(1000, 2000), randomInt(1000, 2000));
                 await moveMouse(page);
 
                 const nextBtn = await page.$(SEL.paginationNext);
                 if (!nextBtn) break;
 
                 await nextBtn.click();
-                await delay(minWait, minWait + 2000);
-              } catch {
+                await liDelay(minWait, minWait + 2000);
+              } catch (e) {
+                if (isDetachedError(e)) {
+                  console.warn('[linkedin] Frame detached during pagination — breaking page loop');
+                }
                 break;
               }
             }
@@ -439,8 +578,8 @@ export async function scrapeLinkedIn(
           const msg = `[linkedin] Error on "${keyword}" / ${exp} in ${geo.label}: ${err instanceof Error ? err.message : String(err)}`;
           console.error(msg);
           errors.push(msg);
-          const errMsg = err instanceof Error ? err.message : String(err);
-          if (page.isClosed() || /Target closed|detached Frame|Session closed/i.test(errMsg)) {
+
+          if (isDetachedError(err) || !isPageAlive(page)) {
             const recovered = await recoverPage();
             if (!recovered) {
               console.warn('[linkedin] Recovery failed — stopping scrape');
@@ -449,14 +588,13 @@ export async function scrapeLinkedIn(
           }
         }
 
-        await delay(Math.max(minWait, 3000), Math.max(minWait, 6000));
+        // Brief pause between experience levels (the session refresh above is the main pause)
+        await liDelay(randomInt(1000, 2000), randomInt(1000, 2000));
       }
-
-      await delay(Math.max(minWait, 5000), Math.max(minWait, 9000));
     }
 
     // Extra pause between geographic regions
-    await delay(Math.max(minWait, 8000), Math.max(minWait, 12000));
+    await liDelay(Math.max(minWait, 2000), Math.max(minWait, 4000));
   }
 
   try { await page.close(); } catch { /* ignore */ }
