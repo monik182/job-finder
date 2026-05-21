@@ -9,7 +9,7 @@ TypeScript-based daily job search automation that:
 4. Classifies jobs using AI (Claude Haiku) into strong/weak/excluded matches
 5. Deduplicates against previously seen jobs using SHA-256 hashing
 6. Sends curated HTML email digests via Resend (strong matches + weaker matches separated)
-7. Runs daily at 4:02 AM UTC via GitHub Actions
+7. Runs daily at 6:02 AM CET via GitHub Actions (per-source workflows)
 8. Persists state (seen job hashes, run logs) back to the repository
 
 ## Important
@@ -25,7 +25,7 @@ When making major changes to this project (new scrapers, new pipeline phases, co
 - **Browser automation:** puppeteer-core 22.15.0 (connects to Browserless.io in prod, local Chrome in dev)
 - **AI classification:** @anthropic-ai/sdk (Claude Haiku 4.5)
 - **Email:** resend 3.5.0
-- **Scheduling:** GitHub Actions cron (`2 4 * * *`)
+- **Scheduling:** GitHub Actions cron (per-source workflows at `2 5 * * *`, LinkedIn also every 2h)
 
 ---
 
@@ -55,7 +55,11 @@ job-finder/
 │   └── email/
 │       └── send-email.ts         # Resend integration + HTML templating
 ├── .github/workflows/
-│   └── job-search.yml            # GitHub Actions schedule
+│   ├── job-search.yml            # All sources (manual trigger only)
+│   ├── job-search-linkedin.yml   # LinkedIn (daily + every 2h)
+│   ├── job-search-anywhere-remote.yml  # Anywhere Remote (daily)
+│   ├── job-search-working-nomads.yml   # Working Nomads (daily)
+│   └── job-search-ycombinator.yml      # YCombinator (daily)
 ├── package.json
 ├── tsconfig.json                 # strict mode, ESNext
 ├── config.json                   # User-editable search & filter settings
@@ -542,12 +546,25 @@ Only jobs that pass AI classification (strong + weak) are persisted to `seen-job
 
 ---
 
-## GitHub Actions (`.github/workflows/job-search.yml`)
+## GitHub Actions (`.github/workflows/`)
 
-- **Trigger:** `cron: '2 4 * * *'` (daily 4:02 AM UTC)
-- **Manual trigger:** `workflow_dispatch` enabled
-- **Permissions:** `contents: write`
-- **Steps:** Checkout → Node.js 20 → `npm ci` → Restore LinkedIn cookies → `npm start` → Commit `seen-jobs.json` + `runs.log` → Push
+### Per-source workflows (scheduled)
+
+Each source has its own workflow running `npm start -- --source=<name>`:
+
+| Workflow | Schedule | Concurrency group |
+|---|---|---|
+| `job-search-linkedin.yml` | `2 */2 * * *` (every 2h) + `2 5 * * *` (daily) | `job-search-linkedin` |
+| `job-search-anywhere-remote.yml` | `2 5 * * *` (daily 6:02 CET) | `job-search-anywhere-remote` |
+| `job-search-working-nomads.yml` | `2 5 * * *` (daily 6:02 CET) | `job-search-working-nomads` |
+| `job-search-ycombinator.yml` | `2 5 * * *` (daily 6:02 CET) | `job-search-ycombinator` |
+
+All workflows: `workflow_dispatch` enabled, `contents: write` permissions.
+Steps: Checkout → Node.js 20 → `npm ci` → (LinkedIn: restore cookies) → `npm start -- --source=X` → Commit `seen-jobs.json` + `runs.log` → Push.
+
+### All-sources workflow (manual only)
+
+`job-search.yml` — Runs all scrapers. Trigger: `workflow_dispatch` only (no schedule).
 
 ---
 

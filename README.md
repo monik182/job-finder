@@ -11,7 +11,7 @@ Automated daily job search that scrapes multiple job boards, filters results wit
 5. **Email** a curated HTML digest via Resend, with strong and weaker matches separated
 6. **Persist** state back to the repo via GitHub Actions
 
-Runs daily at 4:02 AM UTC via GitHub Actions cron, or on-demand via `workflow_dispatch`.
+Each source runs on its own scheduled GitHub Actions workflow at 6:02 AM CET daily. LinkedIn also runs every 2 hours. An all-sources workflow is available via manual `workflow_dispatch`.
 
 ## Setup
 
@@ -142,11 +142,17 @@ If `ANTHROPIC_API_KEY` is not set, all jobs default to "strong" (graceful degrad
 
 ## GitHub Actions
 
-The workflow (`.github/workflows/job-search.yml`) runs daily and:
-1. Scrapes all sources
-2. Filters, deduplicates, and classifies
-3. Sends email digest
-4. Commits updated `seen-jobs.json` and `runs.log` back to the repo
+Each source has its own workflow in `.github/workflows/`:
+
+| Workflow | Schedule |
+|---|---|
+| `job-search-linkedin.yml` | Every 2 hours + daily at 6:02 CET |
+| `job-search-anywhere-remote.yml` | Daily at 6:02 CET |
+| `job-search-working-nomads.yml` | Daily at 6:02 CET |
+| `job-search-ycombinator.yml` | Daily at 6:02 CET |
+| `job-search.yml` | Manual only (all sources) |
+
+Each workflow scrapes its source, filters, deduplicates, classifies, sends an email digest, and commits `seen-jobs.json` + `runs.log`. Concurrency groups prevent overlapping runs per source.
 
 Secrets required: `BROWSERLESS_API_KEY`, `RESEND_API_KEY`, `MY_EMAIL`, `FROM_EMAIL`, `ANTHROPIC_API_KEY`, `LINKEDIN_EMAIL`, `LINKEDIN_PASSWORD`, `LINKEDIN_COOKIES`, `YC_EMAIL`, `YC_PASSWORD`.
 

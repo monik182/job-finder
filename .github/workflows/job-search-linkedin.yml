@@ -1,17 +1,20 @@
-name: Job Search (All Sources)
+name: "Job Search \u2014 LinkedIn"
 
 on:
-  workflow_dispatch:        # Manual trigger only
+  schedule:
+    - cron: '2 */2 * * *'  # Every 2 hours at :02
+    - cron: '2 5 * * *'    # 5:02 AM UTC daily (6:02 AM CET)
+  workflow_dispatch:
 
 concurrency:
-  group: job-search-all
+  group: job-search-linkedin
   cancel-in-progress: false
 
 jobs:
   search:
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # Required to commit seen-jobs.json back to the repo
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -34,7 +37,7 @@ jobs:
             echo "$LINKEDIN_COOKIES" > linkedin-cookies.json
           fi
 
-      - name: Run job search
+      - name: Run job search (LinkedIn)
         env:
           BROWSERLESS_API_KEY: ${{ secrets.BROWSERLESS_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
@@ -43,9 +46,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           LINKEDIN_EMAIL: ${{ secrets.LINKEDIN_EMAIL }}
           LINKEDIN_PASSWORD: ${{ secrets.LINKEDIN_PASSWORD }}
-          YC_EMAIL: ${{ secrets.YC_EMAIL }}
-          YC_PASSWORD: ${{ secrets.YC_PASSWORD }}
-        run: npm start
+        run: npm start -- --source=linkedin
 
       - name: Commit updated seen-jobs.json and runs.log
         run: |
