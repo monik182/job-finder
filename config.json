@@ -1,22 +1,47 @@
 {
   "scraping": {
     "maxPages": 2,
-    "maxJobs": 10,
+    "maxJobs": 20,
     "maxAgeDays": 7,
     "minDelayMs": 1000
   },
   "filters": {
-    "geoLocations": ["worldwide", "europe"],
-    "skills": ["react"],
-    "jobTitle": ["frontend"],
-    "excludedCompanies": ["micro1", "proxify", "epam"],
+    "geoLocations": [
+      "worldwide",
+      "europe"
+    ],
+    "skills": [
+      "react",
+      "typescript",
+      "angular",
+      "nextjs"
+    ],
+    "jobTitle": [
+      "frontend",
+      "front-end"
+    ],
+    "excludedCompanies": [
+      "micro1",
+      "proxify",
+      "epam"
+    ],
     "excludeUsOnly": true,
     "excludeIndia": true,
     "excludeUae": true,
     "excludeSoutheastAsia": true,
-    "excludeSkills": [".net", "java", "c#", "php", "golang", "rust"],
+    "excludeSkills": [
+      ".net",
+      "java",
+      "c#",
+      "php",
+      "golang",
+      "rust"
+    ],
     "excludeClearance": true,
-    "experience": ["senior", "mid"],
+    "experience": [
+      "senior",
+      "mid"
+    ],
     "excludeOnSite": true,
     "excludeHybrid": true,
     "excludeReposted": true,
@@ -31,6 +56,9 @@
       "hourMin": 40,
       "annualMin": 80000
     },
-    "language": ["english", "spanish"]
+    "language": [
+      "english",
+      "spanish"
+    ]
   }
 }
