@@ -2,7 +2,7 @@ name: "Job Search \u2014 Working Nomads"
 
 on:
   schedule:
-    - cron: '2 5 * * *'    # 5:02 AM UTC daily (6:02 AM CET)
+    - cron: '12 5 * * *'   # 5:12 UTC daily (6:12 CET)
   workflow_dispatch:
 
 concurrency:

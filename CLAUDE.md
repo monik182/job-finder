@@ -554,10 +554,10 @@ Each source has its own workflow running `npm start -- --source=<name>`:
 
 | Workflow | Schedule | Concurrency group |
 |---|---|---|
-| `job-search-linkedin.yml` | `2 */2 * * *` (every 2h) + `2 5 * * *` (daily) | `job-search-linkedin` |
 | `job-search-anywhere-remote.yml` | `2 5 * * *` (daily 6:02 CET) | `job-search-anywhere-remote` |
-| `job-search-working-nomads.yml` | `2 5 * * *` (daily 6:02 CET) | `job-search-working-nomads` |
-| `job-search-ycombinator.yml` | `2 5 * * *` (daily 6:02 CET) | `job-search-ycombinator` |
+| `job-search-working-nomads.yml` | `12 5 * * *` (daily 6:12 CET) | `job-search-working-nomads` |
+| `job-search-ycombinator.yml` | `22 5 * * *` (daily 6:22 CET) | `job-search-ycombinator` |
+| `job-search-linkedin.yml` | `32 * * * *` (every hour at :32) | `job-search-linkedin` |
 
 All workflows: `workflow_dispatch` enabled, `contents: write` permissions.
 Steps: Checkout → Node.js 20 → `npm ci` → (LinkedIn: restore cookies) → `npm start -- --source=X` → Commit `seen-jobs.json` + `runs.log` → Push.
