@@ -3,12 +3,18 @@
 ## Overview
 
 TypeScript-based daily job search automation that:
-1. Scrapes 3 job boards via headless browser (LinkedIn, Work at a Startup/YC, Anywhere Remote Jobs)
-2. Filters results using configurable rules (skills, location, experience, contract type, salary, exclusions)
-3. Deduplicates against previously seen jobs using SHA-256 hashing
-4. Sends curated HTML email digests via Resend
-5. Runs daily at 6:02 AM UTC via GitHub Actions
-6. Persists state (seen job hashes, run logs) back to the repository
+1. Scrapes 4 job boards via headless browser (LinkedIn, Work at a Startup/YC, Anywhere Remote Jobs, Working Nomads)
+2. Applies inline filtering during scraping (dedup + hard exclusions)
+3. Filters results using configurable rules (skills, location, experience, contract type, salary, exclusions)
+4. Classifies jobs using AI (Claude Haiku) into strong/weak/excluded matches
+5. Deduplicates against previously seen jobs using SHA-256 hashing
+6. Sends curated HTML email digests via Resend (strong matches + weaker matches separated)
+7. Runs daily at 4:02 AM UTC via GitHub Actions
+8. Persists state (seen job hashes, run logs) back to the repository
+
+## Important
+
+When making major changes to this project (new scrapers, new pipeline phases, config schema changes, new CLI flags, new env vars, workflow changes), **always update both `CLAUDE.md` and `README.md`** to reflect those changes.
 
 ---
 
@@ -17,8 +23,9 @@ TypeScript-based daily job search automation that:
 - **Runtime:** Node.js 20+, TypeScript 5.5.3
 - **Module system:** ESNext modules, ES2022 target, ts-node for ESM support
 - **Browser automation:** puppeteer-core 22.15.0 (connects to Browserless.io in prod, local Chrome in dev)
+- **AI classification:** @anthropic-ai/sdk (Claude Haiku 4.5)
 - **Email:** resend 3.5.0
-- **Scheduling:** GitHub Actions cron (`2 6 * * *`)
+- **Scheduling:** GitHub Actions cron (`2 4 * * *`)
 
 ---
 
@@ -27,18 +34,22 @@ TypeScript-based daily job search automation that:
 ```
 job-finder/
 ├── src/
-│   ├── index.ts                  # Main orchestrator — 7-phase pipeline
+│   ├── index.ts                  # Main orchestrator — 8-phase pipeline
 │   ├── types.ts                  # All shared TypeScript interfaces
 │   ├── config.ts                 # Config loader + AppConfig type
 │   ├── browser.ts                # Puppeteer lifecycle (connect/disconnect)
 │   ├── logger.ts                 # Run logging (JSON-per-line to runs.log)
+│   ├── ai-filter/
+│   │   └── ai-filter.ts          # AI classification via Claude Haiku
 │   ├── scrapers/
 │   │   ├── utils.ts              # newPage, delay, safeGoto, parseRelativeDate
 │   │   ├── linkedin.ts           # LinkedIn Jobs scraper
 │   │   ├── ycombinator.ts        # Work at a Startup scraper
-│   │   └── anywhere-remote.ts   # Anywhere Remote Jobs scraper
+│   │   ├── anywhere-remote.ts    # Anywhere Remote Jobs scraper
+│   │   └── working-nomads.ts     # Working Nomads scraper
 │   ├── filters/
-│   │   └── filter-jobs.ts        # 3-pass filter + priority scoring
+│   │   ├── filter-jobs.ts        # 3-pass filter + priority scoring
+│   │   └── inline-filter.ts      # Inline filter applied during scraping
 │   ├── dedup/
 │   │   └── dedup.ts              # SHA-256 dedup against seen-jobs.json
 │   └── email/
@@ -69,8 +80,10 @@ job-finder/
 ### Optional
 | Variable | Purpose |
 |---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API key for AI classification (if missing, all jobs default to "strong") |
 | `LINKEDIN_EMAIL` | LinkedIn login (if missing, LinkedIn scraping skipped with error) |
 | `LINKEDIN_PASSWORD` | LinkedIn password |
+| `LINKEDIN_COOKIES` | LinkedIn cookies JSON (GitHub Actions secret, written to `linkedin-cookies.json`) |
 | `YC_EMAIL` | YC/Work at a Startup account email |
 | `YC_PASSWORD` | YC password |
 | `NODE_ENV` | Set to `"development"` for dev mode |
@@ -78,22 +91,34 @@ job-finder/
 
 ### Runtime Arguments
 - `--hours=N` — Override `maxAgeDays` time window (N hours; max 4320 = 6 months)
+- `--source=<name>` — Run only a single scraper source (`linkedin`, `anywhere-remote`, `working-nomads`, `ycombinator`)
 
 ---
 
 ## NPM Scripts
 
 ```bash
-npm start              # Production: no .env, secrets from environment
-npm run dev            # Development: loads .env, saves excluded/raw, quiet if no new jobs
-npm run dev:headed     # Dev with visible Chrome
-npm run dev -- --hours=48  # Override time window
-npm run typecheck      # tsc --noEmit
+npm start                    # Production: no .env, secrets from environment
+npm run dev                  # Development: loads .env, saves excluded/raw, quiet if no new jobs
+npm run dev:headed           # Dev with visible Chrome
+npm run dev -- --hours=48    # Override time window
+npm run dev:linkedin         # Dev: only LinkedIn scraper
+npm run dev:anywhere-remote  # Dev: only Anywhere Remote scraper
+npm run dev:working-nomads   # Dev: only Working Nomads scraper
+npm run dev:ycombinator      # Dev: only YC scraper
+npm run typecheck            # tsc --noEmit
 ```
+
+Per-source scripts can be combined with other flags: `npm run dev:linkedin -- --hours=48`
 
 ---
 
 ## Data Structures (`src/types.ts`)
+
+### `JobSource`
+```typescript
+type JobSource = 'linkedin' | 'ycombinator' | 'anywhere-remote' | 'working-nomads';
+```
 
 ### `RawJob`
 Produced by all scrapers, consumed by filters.
@@ -105,13 +130,13 @@ Produced by all scrapers, consumed by filters.
   datePosted: string | null;   // ISO 8601 or null if unparseable
   url: string;
   description: string;          // Job description text or tag list
-  source: 'linkedin' | 'ycombinator' | 'anywhere-remote';
+  source: JobSource;
   scrapedAt: string;            // ISO 8601 timestamp
 }
 ```
 
 ### `FilteredJob`
-Extends `RawJob`; output of filter pass, input to dedup and email.
+Extends `RawJob`; output of filter pass, input to dedup and AI classification.
 ```typescript
 extends RawJob {
   isHighPriority: boolean;
@@ -119,13 +144,54 @@ extends RawJob {
 }
 ```
 
+### `AIMatch`
+```typescript
+type AIMatch = 'strong' | 'weak' | 'excluded';
+```
+
+### `AIClassifiedJob`
+Extends `FilteredJob`; output of AI classification, input to email.
+```typescript
+extends FilteredJob {
+  aiMatch: AIMatch;
+  aiReason: string;             // e.g. "Core React role at mid-size startup"
+}
+```
+
+### `InlineFilterStats`
+Tracks what the inline filter skipped during scraping.
+```typescript
+{
+  skippedAsSeen: number;
+  skippedByHardExclusion: number;
+  excludedJobs: ExcludedJob[];
+}
+```
+
 ### `ScrapeResult`
 Return type of every scraper function.
 ```typescript
 {
-  source: JobSource;            // 'linkedin' | 'ycombinator' | 'anywhere-remote'
+  source: JobSource;
   jobs: RawJob[];
   errors: string[];
+  inlineStats: InlineFilterStats;
+}
+```
+
+### `EmailReport`
+Input to the email system.
+```typescript
+{
+  totalFound: number;
+  totalAfterFilter: number;
+  totalNew: number;
+  totalStrong: number;
+  totalWeak: number;
+  strongBySource: Partial<Record<JobSource, AIClassifiedJob[]>>;
+  weakBySource: Partial<Record<JobSource, AIClassifiedJob[]>>;
+  date: string;
+  scraperErrors: string[];
 }
 ```
 
@@ -138,20 +204,16 @@ Persisted in `seen-jobs.json`; committed to repo by GitHub Actions.
 }
 ```
 
-### `ExcludedJobsStore`
-Dev-only, appended to `excluded-jobs.json` per run.
+### `ExcludedJob`
 ```typescript
 {
-  lastUpdated: string;
-  jobs: {
-    title: string;
-    company: string;
-    url: string;
-    source: JobSource;
-    datePosted: string;         // ISO or 'unknown'
-    excludedAt: string;         // ISO timestamp
-    reasons: string[];          // e.g. ["us-only", "no-skills-or-title-match"]
-  }[]
+  title: string;
+  company: string;
+  url: string;
+  source: JobSource;
+  datePosted: string;           // ISO or 'unknown'
+  excludedAt: string;           // ISO timestamp
+  reasons: string[];            // e.g. ["us-only", "no-skills-or-title-match"]
 }
 ```
 
@@ -159,8 +221,8 @@ Dev-only, appended to `excluded-jobs.json` per run.
 One JSON line appended to `runs.log` per production run.
 ```typescript
 {
-  startedAt: string;            // ISO 8601
-  finishedAt: string;           // ISO 8601
+  startedAt: string;
+  finishedAt: string;
   seenJobsTotal: number;
   rawJobsFound: number;
   newJobsFound: number;
@@ -181,24 +243,25 @@ One JSON line appended to `runs.log` per production run.
 
 `loadConfig()` reads `config.json` and validates at least 1 skill and 1 jobTitle.
 
+`getSearchTerms(config)` returns a deduplicated array of skills + jobTitle for use as search queries.
+
 ### Full `config.json` Schema
 
 ```jsonc
 {
   "scraping": {
-    "maxPages": 1,              // Max result pages per search query
+    "maxPages": 2,              // Max result pages per search query
     "maxJobs": 10,              // Max jobs per search combination
-    "maxAgeDays": 7             // Job age cutoff in days (overridable with --hours=N)
-  },
-  "search": {
-    "geoLocations": ["latam", "usa", "europe", "worldwide"],
-    "skills": ["react", "typescript"],  // REQUIRED: ≥1. Used as search queries AND title/desc matching
-    "jobTitle": ["frontend", "full stack"]  // REQUIRED: ≥1. Used for inclusion matching
+    "maxAgeDays": 7,            // Job age cutoff in days (overridable with --hours=N)
+    "minDelayMs": 1000          // Minimum delay between scraping actions
   },
   "filters": {
-    "experience": ["mid", "senior"],    // Options: junior|mid|senior|lead|staff|principal|director|c-level
-    "contractTypes": [],                // Empty = all types. Options: full-time|part-time|contract|freelance|temporary
-    "language": ["english"],
+    "geoLocations": ["worldwide", "europe"],
+    "skills": ["react"],                    // REQUIRED: ≥1. Used as search queries AND title/desc matching
+    "jobTitle": ["frontend"],               // REQUIRED: ≥1. Used for inclusion matching
+    "experience": ["mid", "senior"],        // Options: junior|mid|senior|lead|staff|principal|director|c-level
+    "contractTypes": [],                    // Empty = all types. Options: full-time|part-time|contract|freelance|temporary
+    "language": ["english", "spanish"],
     "remote": true,
     "excludeUsOnly": true,
     "excludeIndia": true,
@@ -207,20 +270,24 @@ One JSON line appended to `runs.log` per production run.
     "excludeClearance": true,
     "excludeOnSite": true,
     "excludeHybrid": true,
-    "excludedCompanies": [],            // Case-insensitive company name matches
-    "excludeSkills": [".net", "java"],  // Terms to block in title/description
+    "excludeEquityOnly": true,             // Blocks equity-only / unpaid roles
+    "excludeCrypto": true,                 // Blocks crypto/blockchain/DeFi jobs
+    "excludedCompanies": ["micro1"],       // Case-insensitive company name matches
+    "excludeSkills": [".net", "java"],     // Terms to block in title/description
     "salary": {
-      "hour": null,                     // null = no filter. Excludes if salary found AND below
+      "hour": null,                        // null = no filter. Excludes if salary found AND below
       "month": null,
       "annual": null
     },
     "prioritySalary": {
-      "hourMin": 40,                    // Flag as high priority if salary ≥ this
+      "hourMin": 40,                       // Flag as high priority if salary ≥ this
       "annualMin": 80000
     }
   }
 }
 ```
+
+Note: `geoLocations`, `skills`, and `jobTitle` are inside the `filters` section (no separate `search` section).
 
 ### GeoLocation → LinkedIn GeoId mapping
 | Config value | LinkedIn geoId | AnywhereRemote param |
@@ -234,15 +301,35 @@ One JSON line appended to `runs.log` per production run.
 
 ## Pipeline Architecture (`src/index.ts`)
 
-7 sequential phases:
+8 sequential phases:
 
 1. **Environment Validation** — Check required env vars exist
 2. **Config Loading** — `loadConfig()`, validate skills/jobTitle arrays non-empty
-3. **Browser Connection** — `getBrowser()`: Browserless WebSocket or local Chrome (with 10s retry on failure)
-4. **Scraping** — Run LinkedIn → AnywhereRemote → YCombinator, collect all `ScrapeResult[]`
+3. **Browser Connection** — `getBrowser()`: Browserless WebSocket or local Chrome (with 10s retry on failure). Each scraper gets a fresh browser session via `withFreshBrowser()`.
+4. **Scraping** — Run LinkedIn → AnywhereRemote → Working Nomads → YCombinator (or single source via `--source`). Inline filter applied during scraping to skip seen/excluded jobs early.
 5. **Filtering** — `filterJobs(allJobs, config)`: 3-pass filter, returns `FilteredJob[]`
 6. **Deduplication** — `deduplicateJobs(filtered)`: SHA-256 hash check against `seen-jobs.json`
-7. **Email & Persistence** — Send email via Resend, write updated `seen-jobs.json`, append `runs.log`
+7. **AI Classification** — `classifyJobs(newJobs, config)`: Claude Haiku classifies each job as strong/weak/excluded
+8. **Email & Persistence** — Send email via Resend (strong + weak sections), write updated `seen-jobs.json`, append `runs.log`
+
+---
+
+## Inline Filtering (`src/filters/inline-filter.ts`)
+
+Applied **during scraping** to avoid collecting jobs that would be filtered out later.
+
+`createInlineFilter(config, persistedHashes)` returns an `InlineJobFilter` with:
+- `check(job)` — Returns job if it passes, `null` if filtered
+- `checkBatch(jobs)` — Batch version
+- `keptCount` — Running count of passing jobs
+- `stats` — Accumulated `InlineFilterStats`
+
+Three-level dedup:
+1. SHA-256 hash against persisted jobs (from `seen-jobs.json`)
+2. SHA-256 hash against jobs seen this run
+3. Title + company combo key (catches same job across different URLs)
+
+Also applies hard exclusions from `filter-jobs.ts` during scraping.
 
 ---
 
@@ -252,7 +339,8 @@ One JSON line appended to `runs.log` per production run.
 
 **Authentication:**
 - Logs in via email/password (env: `LINKEDIN_EMAIL`, `LINKEDIN_PASSWORD`)
-- If either missing → returns `ScrapeResult` with error, no scraping
+- Supports cookie-based auth via `linkedin-cookies.json` (restored from `LINKEDIN_COOKIES` secret in CI)
+- If both missing → returns `ScrapeResult` with error, no scraping
 - Human-like typing (80–150ms per character), random mouse movements
 - Detects auth walls: `/login`, `/checkpoint`, `/authwall` in URL → stops
 
@@ -280,13 +368,14 @@ https://www.linkedin.com/jobs/search/?keywords={skill}&geoId={id}&f_E={codes}&f_
 **Time range:** `f_TPR=r{maxAgeDays * 86400}` (seconds)
 
 **Extraction flow:**
-1. Login
+1. Login (cookies or email/password)
 2. For each `(geoLocation × skill)` combination:
    - Navigate to search URL
    - Paginate (limited by `maxPages`)
    - Click each job card, wait for detail panel
    - Extract: title (h1), company, location (bullet element), description (3000 chars max)
    - Parse datePosted from `<time datetime="...">` attribute
+   - Inline filter applied per job
    - Skip URL duplicates
 3. Delays: 2–5s between actions, 5–9s between skills, 8–12s between geos
 
@@ -311,6 +400,7 @@ https://www.workatastartup.com/companies?query={skill}&sort=created_desc[&remote
    - Wait for React hydration (`directory-list` selector)
    - Scroll 5× (infinite scroll, ~10 jobs per scroll) or until `maxJobs` reached
    - Extract company cards → job items (title, tags array, URL)
+   - Inline filter applied per job
    - Tags stored as both `location` and `description`
 3. Delays: 5–9s between queries
 
@@ -336,9 +426,42 @@ https://anywhereremotejobs.com/remote-jobs?country[0]=LATAM&tech[0]=react&experi
 1. Navigate to search URL
 2. Paginate (limited by `maxPages`)
 3. Extract from each `<article>`: title, company, date, tags (skill/category)
-4. Parse relative date ("2 days ago" → ISO)
-5. Skip URL duplicates
-6. Delays: 2–5s between pages
+4. Inline filter applied per job
+5. Parse relative date ("2 days ago" → ISO)
+6. Skip URL duplicates
+7. Delays: 2–5s between pages
+
+---
+
+### Working Nomads (`src/scrapers/working-nomads.ts`)
+
+**No authentication required.**
+
+**Base URL:** `https://www.workingnomads.com`
+
+**Experience → param mapping:**
+| Config | Param value |
+|---|---|
+| junior | entry-level |
+| mid | mid-level |
+| senior, lead, staff, principal, director, c-level | senior |
+
+**Geo → param mapping:**
+| Config | Param value |
+|---|---|
+| latam | latin-america |
+| usa | usa, north-america |
+| europe | europe |
+| worldwide | anywhere |
+
+**Contract type mapping:** full-time, part-time, contract (freelance maps to contract)
+
+**Extraction flow:**
+1. Navigate to search URL with skill/geo/experience params
+2. Click-based "Show more" pagination
+3. Extract job items via CSS selectors (title, company, date, description)
+4. Inline filter applied per job
+5. Delays: 5–9s between skill searches
 
 ---
 
@@ -348,46 +471,34 @@ Three sequential passes. Each excluded job records its `reasons[]`.
 
 ### Pass 1: Hard Exclusions
 
-Applied in order; first match records reason and stops further checks for that job.
-
 | Reason key | Config flag | Pattern |
 |---|---|---|
-| `us-only` | `excludeUsOnly` | `/\b(US\|U\.S\.\|United States)\s+(citizen\|citizenship\|work\s*auth\|only\|resident\|person)\b/i` |
-| `clearance-required` | `excludeClearance` | `/security\s+clearance\|clearance\s+required\|\bcleared\b/i` |
-| `experience-{level}` | derived from `experience` | Title matches a level NOT in config (e.g. "senior" in title when config only has ["junior"]) |
-| `on-site` | `excludeOnSite` | `/\b(on[- ]?site\|in[- ]office\|in[- ]person\|must\s+relocate)\b/i` |
-| `hybrid` | `excludeHybrid` | `/\bhybrid\b/i` |
-| `india-market` | `excludeIndia` | `/\b(india\|bangalore\|mumbai\|delhi\|hyderabad\|chennai\|pune\|kolkata\|noida\|gurugram\|...)\b\|₹/i` |
-| `uae-gulf-market` | `excludeUae` | `/\b(UAE\|dubai\|abu\s*dhabi\|saudi\s*arabia\|riyadh\|qatar\|doha\|kuwait\|bahrain\|oman\|muscat)\b/i` |
-| `southeast-asia` | `excludeSoutheastAsia` | `/\b(vietnam\|thailand\|indonesia\|philippines\|malaysia\|myanmar\|cambodia\|laos\|singapore\|brunei\|timor)\b\|₫\|₱\|(?<!\w)RM\s*\d/i` |
+| `us-only` | `excludeUsOnly` | US citizen/work auth patterns |
+| `clearance-required` | `excludeClearance` | Security clearance patterns |
+| `experience-{level}` | derived from `experience` | Title matches a level NOT in config |
+| `on-site` | `excludeOnSite` | On-site/in-office/must relocate patterns |
+| `hybrid` | `excludeHybrid` | Hybrid work patterns |
+| `india-market` | `excludeIndia` | Indian city names + ₹ symbol |
+| `uae-gulf-market` | `excludeUae` | UAE/Gulf city names |
+| `southeast-asia` | `excludeSoutheastAsia` | SEA country names + currency symbols |
 | `excluded-company` | `excludedCompanies[]` | Case-insensitive company name match |
 | `excluded-skill` | `excludeSkills[]` | Term found in title or description |
+| `equity-only` | `excludeEquityOnly` | Equity-only / unpaid role patterns |
+| `crypto` | `excludeCrypto` | Crypto/blockchain/DeFi terms + coin symbols |
+| `too-old` | derived from `maxAgeDays` | `datePosted` outside time window |
 
 ### Pass 2: Required Inclusions
-
-All conditions must be satisfied or the job is excluded.
 
 | Reason key | Condition |
 |---|---|
 | `no-skills-or-title-match` | Must match at least 1 skill OR 1 jobTitle in title/description |
 | `not-remote` | If `filters.remote=true`, `/\bremote\b/i` must match location or description |
-| `too-old` | `datePosted` must be within `maxAgeDays * 24` hours (or `--hours=N` override) |
 | `no-contract-type` | If `contractTypes` non-empty, must match at least one type pattern |
 | `salary-below-minimum` | If salary found AND below ALL configured salary minimums → excluded |
 
-**Salary extraction regex:** `/\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*k?\s*(?:\/\|\s+per\s+)?\s*(hr\|hour\|yr\|year\|annual)?/gi`
-
-**Salary conversion logic:**
-- If marked `k` and value < 10,000 → multiply by 1,000
-- Hourly → annual: `hourly × 2000`
-- Annual → hourly: `annual / 2000`
-- Monthly: `annual / 12`
-- No unit & value < 500 → assume hourly; else assume annual
-- Jobs with **no salary info are never excluded** by salary filters
-
 ### Pass 3: Priority Flags
 
-Applied after passes 1 & 2. Sets `isHighPriority=true` and appends to `priorityReasons[]`.
+Sets `isHighPriority=true` and appends to `priorityReasons[]`.
 
 | Trigger | Pattern / Condition |
 |---|---|
@@ -396,85 +507,47 @@ Applied after passes 1 & 2. Sets `isHighPriority=true` and appends to `priorityR
 | Company size 50–499 | `/\b([5-9]\d\|[1-4]\d\d)\s*employees?\b/i` in description |
 | Salary threshold | `hourly >= prioritySalary.hourMin` OR `annual >= prioritySalary.annualMin` |
 
+**Key exports:** `buildHardExclusionContext()`, `getHardExclusionReasons()`, `filterJobs()`, `saveRawJobs()`, `saveExcludedJobs()`
+
+---
+
+## AI Classification (`src/ai-filter/ai-filter.ts`)
+
+Post-filter classification using Claude Haiku to improve signal-to-noise ratio in emails.
+
+`classifyJobs(jobs, config)` → `AIClassifiedJob[]`
+
+- **Model:** `claude-haiku-4-5-20251001`
+- **Concurrency:** Max 5 concurrent API calls via worker pool
+- **Classification:** "strong" (target role + skills central), "weak" (incidental match), "excluded" (not relevant or wrong language)
+- **Fallback:** Missing API key → all jobs default to "strong". API error → individual job defaults to "strong".
+- **Only strong + weak jobs are emailed.** AI-excluded jobs logged to `excluded-jobs.json` in dev mode.
+
 ---
 
 ## Deduplication (`src/dedup/dedup.ts`)
 
-**Hash key:**
-```
-key = [company.toLowerCase().trim(), title.toLowerCase().trim(), url].join('|')
-hash = sha256(key)
-```
+**Hash key:** `sha256([company, title, url].map(s => s.toLowerCase().trim()).join('|'))`
 
-**Logic:**
-1. Load `seen-jobs.json` → put all hashes in a `Set`
-2. For each `FilteredJob`, compute hash
-3. If hash not in Set → new job (add to results, add hash to Set)
-4. Write updated `seen-jobs.json` with merged old + new hashes
-5. GitHub Actions commits the updated file back to the repo
+Only jobs that pass AI classification (strong + weak) are persisted to `seen-jobs.json`. AI-excluded jobs can reappear in future runs.
 
 ---
 
 ## Email System (`src/email/send-email.ts`)
 
-**Resend config:**
-- From: `FROM_EMAIL`
-- To: `MY_EMAIL`
-
-**Subject lines:**
-- With new jobs: `🔍 Job Search Results - {date} - {N} new jobs found`
-- No new jobs: `No new jobs today. Keep going 💪`
-
-**HTML template structure:**
-1. Dark header bar — "🔍 Job Search Results" + date
-2. Summary bar — raw found | after filters | new (counts)
-3. Job cards grouped by source (LinkedIn → YC → AnywhereRemote)
-4. Footer — statistics + source names
-
-**Job card variants:**
-- **High priority:** Yellow/amber background, "⭐ High Priority" label, yellow badge pills for each `priorityReason`
-- **Regular:** Light gray border
-- Both contain: title (link), company, location, datePosted, description snippet, priority badges if applicable
-
-**No-jobs email:** Sends "No new jobs today. Keep going 💪" body (production always sends; dev skips if no new jobs).
-
----
-
-## Run Logging (`src/logger.ts`)
-
-**`runs.log`** — newline-delimited JSON, production only.
-
-```json
-{
-  "startedAt": "2026-05-19T06:02:00.000Z",
-  "finishedAt": "2026-05-19T06:08:42.000Z",
-  "seenJobsTotal": 347,
-  "rawJobsFound": 63,
-  "newJobsFound": 4,
-  "excludedJobs": {
-    "bySource": { "linkedin": 28, "ycombinator": 12, "anywhere-remote": 19 },
-    "total": 59
-  },
-  "errors": {
-    "bySource": { "linkedin": [], "ycombinator": [], "anywhere-remote": [] },
-    "global": []
-  }
-}
-```
+- **From:** `FROM_EMAIL` → **To:** `MY_EMAIL`
+- **Two sections:** "Job Matches" (strong) + "Other Matches" (weak, with AI reasoning)
+- **Job cards:** High priority = yellow/amber background + priority badges; Regular = light gray border
+- **No-jobs email:** Production only
 
 ---
 
 ## GitHub Actions (`.github/workflows/job-search.yml`)
 
-- **Trigger:** `cron: '2 6 * * *'` (daily 6:02 AM UTC)
+- **Trigger:** `cron: '2 4 * * *'` (daily 4:02 AM UTC)
+- **Manual trigger:** `workflow_dispatch` enabled
 - **Permissions:** `contents: write`
-- **Steps:**
-  1. Checkout repo
-  2. Setup Node.js 20 (npm cache)
-  3. `npm ci`
-  4. `npm start` (env vars injected from GitHub Secrets)
-  5. Git config + commit `seen-jobs.json` if changed (commit message includes `[skip ci]`)
-  6. `git push`
+- **Steps:** Checkout → Node.js 20 → `npm ci` → Restore LinkedIn cookies → `npm start` → Commit `seen-jobs.json` + `runs.log` → Push
 
 ---
 
@@ -482,80 +555,42 @@ hash = sha256(key)
 
 | Behavior | Development (`NODE_ENV=development`) | Production (GitHub Actions) |
 |---|---|---|
-| Browser | Local Chrome at `/Applications/Google Chrome.app/...` | Browserless.io WebSocket |
+| Browser | Local Chrome | Browserless.io WebSocket (stealth mode) |
 | Visible UI | `HEADED=true` enables it | Never |
-| `raw-jobs.json` | Saved (all scraped jobs) | Not saved |
-| `excluded-jobs.json` | Saved (filtered jobs with reasons) | Not saved |
-| Email if no new jobs | Skipped (quiet mode) | Sent (confirms script ran) |
+| `raw-jobs.json` | Saved | Not saved |
+| `excluded-jobs.json` | Saved (filtered + AI-excluded) | Not saved |
+| Email if no new jobs | Skipped | Sent |
 | `runs.log` | Not appended | Appended |
 | `.env` file | Loaded automatically | Not used |
 
 ---
 
-## Shared Utilities
-
-### `src/scrapers/utils.ts`
-
-| Function | Signature | Purpose |
-|---|---|---|
-| `newPage` | `(browser) => Promise<Page>` | Creates page with spoofed user-agent, viewport, webdriver detection bypass |
-| `delay` | `(min: number, max: number) => Promise<void>` | Random delay in ms |
-| `safeGoto` | `(page, url, timeout?) => Promise<void>` | Wrapped `page.goto` with error handling |
-| `parseRelativeDate` | `(raw: string) => string \| null` | Converts "2 days ago", "just now", ISO strings → ISO 8601 |
-
-**`parseRelativeDate` handles:**
-- ISO strings (`/^\d{4}-\d{2}-\d{2}/`) → returned as-is
-- `"just now"` / `"today"` → current time
-- `"X minutes ago"`, `"X hours ago"`, `"X days ago"`, `"X weeks ago"`
-
-### `src/browser.ts`
-
-| Function | Purpose |
-|---|---|
-| `getBrowser()` | Returns Browserless WebSocket connection (prod) or local Chrome (dev); 1 retry after 10s |
-| `closeBrowser(browser)` | Closes local browser or disconnects from Browserless |
-
-### `src/config.ts`
-
-| Function | Purpose |
-|---|---|
-| `loadConfig()` | Reads `config.json`, validates required fields, returns typed `AppConfig` |
-
----
-
 ## All Exclusion Reason Keys
 
-Used in `excluded-jobs.json` `reasons[]` array:
-
 ```
-us-only
-clearance-required
-experience-junior | experience-mid | experience-senior | experience-lead | experience-staff | experience-principal | experience-director | experience-c-level
-on-site
-hybrid
-india-market
-uae-gulf-market
-southeast-asia
-excluded-company
-excluded-skill
-no-skills-or-title-match
-not-remote
-too-old
-no-contract-type
-salary-below-minimum
+us-only, clearance-required, experience-{level}, on-site, hybrid,
+india-market, uae-gulf-market, southeast-asia, excluded-company,
+excluded-skill, equity-only, crypto, too-old,
+no-skills-or-title-match, not-remote, no-contract-type,
+salary-below-minimum, ai-filter
 ```
 
 ---
 
 ## Edge Cases & Invariants
 
-1. **No salary info → never excluded.** Salary minimums only filter jobs that have salary data AND fall below ALL configured minimums simultaneously.
-2. **Experience matching uses title only** (not description) to detect experience level for exclusion.
-3. **`contractTypes: []` means all types allowed** — no `f_JT` param on LinkedIn (F, C, T all included).
-4. **YC has no geo support** — always searches globally regardless of `geoLocations` config.
-5. **`--hours=N` caps at 4320** (6 months) to prevent unbounded scraping.
-6. **Dedup hash includes URL** — same job reposted at a new URL will be treated as new.
-7. **LinkedIn requires both email + password** — missing either returns error, not partial scraping.
-8. **Browserless has 1 retry after 10s** on initial connection failure.
-9. **YC infinite scroll** — scrolls up to 5× or until `maxJobs` reached or no new content loads.
-10. **Seen-jobs.json grows indefinitely** — hashes are never pruned (acceptable for daily job counts).
+1. **No salary info → never excluded.** Salary minimums only filter jobs with salary data AND below ALL minimums.
+2. **Experience matching uses title only** (not description).
+3. **`contractTypes: []` means all types allowed.**
+4. **YC has no geo support** — always global.
+5. **`--hours=N` caps at 4320** (6 months).
+6. **Dedup hash includes URL** — same job at new URL = new job.
+7. **LinkedIn requires email+password OR cookies.**
+8. **Browserless has 1 retry after 10s.**
+9. **YC infinite scroll** — up to 5× or until `maxJobs`.
+10. **Seen-jobs.json grows indefinitely** — never pruned.
+11. **AI-excluded jobs NOT persisted to seen-jobs.json** — can reappear.
+12. **AI classification degrades gracefully** — missing key/errors default to "strong".
+13. **Each scraper gets a fresh browser session** via `withFreshBrowser()`.
+14. **Inline filtering during scraping** prevents collecting doomed jobs.
+15. **`--source` flag** runs single scraper but full pipeline continues.
