@@ -7,11 +7,12 @@ import { scrapeYCombinator } from './scrapers/ycombinator.js';
 import { scrapeLinkedIn } from './scrapers/linkedin.js';
 import { scrapeWorkingNomads } from './scrapers/working-nomads.js';
 import { filterJobs, saveExcludedJobs, saveRawJobs } from './filters/filter-jobs.js';
+import { createInlineFilter } from './filters/inline-filter.js';
 import { loadSeenJobs, saveSeenJobs, deduplicateJobs } from './dedup/dedup.js';
 import { sendEmail } from './email/send-email.js';
 import { buildRunLog, appendRunLog } from './logger.js';
 import { classifyJobs } from './ai-filter/ai-filter.js';
-import { type AIClassifiedJob, type EmailReport, type JobSource, type RawJob, type ScrapeResult } from './types.js';
+import { type AIClassifiedJob, type EmailReport, type FilteredJob, type JobSource, type RawJob, type ScrapeResult } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SEEN_JOBS_PATH = resolve(__dirname, '..', 'seen-jobs.json');
@@ -56,6 +57,11 @@ async function main(): Promise<void> {
   }
 
   try {
+    // Load seen jobs early so the inline filter can dedup during scraping
+    const store = loadSeenJobs(SEEN_JOBS_PATH);
+    const persistedHashes = new Set(store.hashes);
+    const inlineFilter = createInlineFilter(config, persistedHashes);
+
     // Scrape in order: each scraper gets its own fresh browser session
     const results: ScrapeResult[] = [];
     const allRawJobs: RawJob[] = [];
@@ -66,28 +72,31 @@ async function main(): Promise<void> {
     };
 
     console.log('\n[main] Scraping LinkedIn...');
-    try { results.push(await withFreshBrowser((b) => scrapeLinkedIn(b, config, checkpoint))); } catch (e) { console.error('[main] LinkedIn failed:', e); }
+    try { results.push(await withFreshBrowser((b) => scrapeLinkedIn(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] LinkedIn failed:', e); }
 
     console.log('\n[main] Scraping Anywhere Remote Jobs...');
-    try { results.push(await withFreshBrowser((b) => scrapeAnywhereRemote(b, config, checkpoint))); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
+    try { results.push(await withFreshBrowser((b) => scrapeAnywhereRemote(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
 
     console.log('\n[main] Scraping Working Nomads...');
-    try { results.push(await withFreshBrowser((b) => scrapeWorkingNomads(b, config, checkpoint))); } catch (e) { console.error('[main] Working Nomads failed:', e); }
+    try { results.push(await withFreshBrowser((b) => scrapeWorkingNomads(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] Working Nomads failed:', e); }
 
     console.log('\n[main] Scraping Work at a Startup (YC)...');
-    try { results.push(await withFreshBrowser((b) => scrapeYCombinator(b, config, checkpoint))); } catch (e) { console.error('[main] YCombinator failed:', e); }
+    try { results.push(await withFreshBrowser((b) => scrapeYCombinator(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] YCombinator failed:', e); }
 
     results.forEach((r) => allErrors.push(...r.errors));
 
-    console.log(`\n[main] Total raw jobs collected: ${allRawJobs.length} (saved to raw-jobs.json)`);
+    const inlineExcluded = results.flatMap((r) => r.inlineStats.excludedJobs);
+    const totalInlineSkipped = results.reduce((sum, r) =>
+      sum + r.inlineStats.skippedAsSeen + r.inlineStats.skippedByHardExclusion, 0);
+    console.log(`\n[main] Inline filtering: ${totalInlineSkipped} jobs skipped during scraping (${inlineFilter.stats.skippedAsSeen} seen, ${inlineFilter.stats.skippedByHardExclusion} excluded)`);
+    console.log(`[main] Total jobs after inline filtering: ${allRawJobs.length} (saved to raw-jobs.json)`);
 
     // Filter
     const { filtered: filteredJobs, excluded: excludedJobs } = filterJobs(allRawJobs, config);
     console.log(`[main] After filtering: ${filteredJobs.length} kept, ${excludedJobs.length} excluded`);
 
-    // Dedup
-    const store = loadSeenJobs(SEEN_JOBS_PATH);
-    const { newJobs, updatedStore } = deduplicateJobs(filteredJobs, store);
+    // Dedup (seen-jobs store was loaded earlier for inline filtering)
+    const { newJobs } = deduplicateJobs(filteredJobs, store);
     console.log(`[main] New jobs (not seen before): ${newJobs.length}`);
 
     // Phase 6.5: AI classification
@@ -97,6 +106,10 @@ async function main(): Promise<void> {
     const weakJobs = classifiedJobs.filter((j) => j.aiMatch === 'weak');
     const aiExcludedJobs = classifiedJobs.filter((j) => j.aiMatch === 'excluded');
     console.log(`[main] AI classification: ${strongJobs.length} strong, ${weakJobs.length} weak, ${aiExcludedJobs.length} excluded`);
+
+    // Build seen-jobs store AFTER AI classification — only persist jobs that will be emailed
+    const emailedJobs: FilteredJob[] = [...strongJobs, ...weakJobs];
+    const { updatedStore } = deduplicateJobs(emailedJobs, store);
 
     const aiExcludedAt = new Date().toISOString();
     const aiExcludedForLog = aiExcludedJobs.map((j) => ({
@@ -127,7 +140,7 @@ async function main(): Promise<void> {
     }
 
     const report: EmailReport = {
-      totalFound: allRawJobs.length,
+      totalFound: allRawJobs.length + totalInlineSkipped,
       totalAfterFilter: filteredJobs.length,
       totalNew: newJobs.length,
       totalStrong: strongJobs.length,
@@ -144,9 +157,9 @@ async function main(): Promise<void> {
 
     // Persist excluded jobs (dev only)
     if (process.env['NODE_ENV'] === 'development') {
-      const allExcluded = [...excludedJobs, ...aiExcludedForLog];
+      const allExcluded = [...inlineExcluded, ...excludedJobs, ...aiExcludedForLog];
       saveExcludedJobs(EXCLUDED_JOBS_PATH, allExcluded);
-      console.log(`[main] Updated excluded-jobs.json (+${allExcluded.length} exclusions, ${aiExcludedForLog.length} from AI filter)`);
+      console.log(`[main] Updated excluded-jobs.json (+${allExcluded.length} exclusions: ${inlineExcluded.length} inline, ${excludedJobs.length} global, ${aiExcludedForLog.length} AI)`);
     }
 
     // Send email only if there are jobs to show (after AI filtering)
@@ -162,9 +175,9 @@ async function main(): Promise<void> {
         startedAt,
         finishedAt: new Date().toISOString(),
         seenJobsTotal: updatedStore.hashes.length,
-        rawJobsFound: allRawJobs.length,
+        rawJobsFound: allRawJobs.length + totalInlineSkipped,
         newJobsFound: newJobs.length,
-        excludedJobs,
+        excludedJobs: [...inlineExcluded, ...excludedJobs],
         results,
         globalErrors: allErrors.filter(
           (e) => !results.some((r) => r.errors.includes(e)),

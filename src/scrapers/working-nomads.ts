@@ -1,6 +1,7 @@
 import { type Browser } from 'puppeteer-core';
-import { type RawJob, type ScrapeResult } from '../types.js';
+import { type RawJob, type ScrapeResult, type InlineFilterStats } from '../types.js';
 import { type AppConfig, type ExperienceLevel, type ContractType, type GeoLocation, getSearchTerms } from '../config.js';
+import { type InlineJobFilter } from '../filters/inline-filter.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 
 const SOURCE = 'working-nomads' as const;
@@ -95,10 +96,13 @@ function buildJobsUrl(config: AppConfig, skill: string): string {
   return `${BASE_URL}/jobs?${params.toString()}`;
 }
 
+const EMPTY_INLINE_STATS: InlineFilterStats = { skippedAsSeen: 0, skippedByHardExclusion: 0, excludedJobs: [] };
+
 export async function scrapeWorkingNomads(
   browser: Browser,
   config: AppConfig,
   onProgress?: (newJobs: RawJob[]) => void,
+  inlineFilter?: InlineJobFilter,
 ): Promise<ScrapeResult> {
   const jobs: RawJob[] = [];
   const errors: string[] = [];
@@ -182,12 +186,17 @@ export async function scrapeWorkingNomads(
             source: SOURCE,
             scrapedAt,
           };
+
+          if (inlineFilter && !inlineFilter.check(job)) continue;
+
           jobs.push(job);
           batchJobs.push(job);
         }
 
         if (batchJobs.length > 0) onProgress?.(batchJobs);
         console.log(`[working-nomads] skill="${skill}" page ${pageNum}: ${rawJobs.length} listings`);
+
+        if (jobs.length >= config.scraping.maxJobs) break;
 
         // Try to click "Show more" for next page
         if (pageNum >= maxPages) break;
@@ -217,5 +226,5 @@ export async function scrapeWorkingNomads(
   }
 
   console.log(`[working-nomads] Total: ${jobs.length} jobs (${seenUrls.size} unique)`);
-  return { source: SOURCE, jobs, errors };
+  return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
 }

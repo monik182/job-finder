@@ -1,6 +1,7 @@
 import { type Browser } from 'puppeteer-core';
-import { type RawJob, type ScrapeResult } from '../types.js';
+import { type RawJob, type ScrapeResult, type InlineFilterStats } from '../types.js';
 import { type AppConfig, getSearchTerms } from '../config.js';
+import { type InlineJobFilter } from '../filters/inline-filter.js';
 import { newPage, delay, safeGoto } from './utils.js';
 
 const SOURCE = 'ycombinator' as const;
@@ -52,10 +53,13 @@ interface RawJobData {
   url: string;
 }
 
+const EMPTY_INLINE_STATS: InlineFilterStats = { skippedAsSeen: 0, skippedByHardExclusion: 0, excludedJobs: [] };
+
 export async function scrapeYCombinator(
   browser: Browser,
   config: AppConfig,
   onProgress?: (newJobs: RawJob[]) => void,
+  inlineFilter?: InlineJobFilter,
 ): Promise<ScrapeResult> {
   const jobs: RawJob[] = [];
   const errors: string[] = [];
@@ -69,6 +73,7 @@ export async function scrapeYCombinator(
       source: SOURCE,
       jobs,
       errors: ['[ycombinator] YC_EMAIL or YC_PASSWORD not set in environment'],
+      inlineStats: EMPTY_INLINE_STATS,
     };
   }
 
@@ -80,7 +85,7 @@ export async function scrapeYCombinator(
     if (!loginOk) {
       errors.push('[ycombinator] Failed to load login page');
       await page.close();
-      return { source: SOURCE, jobs, errors };
+      return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
     }
 
     await page.waitForSelector(SEL.emailInput, { timeout: 15_000 });
@@ -110,7 +115,7 @@ export async function scrapeYCombinator(
     if (!currentUrl.includes('workatastartup.com')) {
       errors.push(`[ycombinator] Login may have failed — landed on: ${currentUrl}`);
       await page.close();
-      return { source: SOURCE, jobs, errors };
+      return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
     }
 
     console.log('[ycombinator] Login successful');
@@ -120,7 +125,7 @@ export async function scrapeYCombinator(
     console.error(msg);
     errors.push(msg);
     await page.close();
-    return { source: SOURCE, jobs, errors };
+    return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
   }
 
   const queries = buildQueries(config);
@@ -214,6 +219,9 @@ export async function scrapeYCombinator(
           source: SOURCE,
           scrapedAt,
         };
+
+        if (inlineFilter && !inlineFilter.check(job)) continue;
+
         jobs.push(job);
         batchJobs.push(job);
       }
@@ -231,5 +239,5 @@ export async function scrapeYCombinator(
 
   try { await page.close(); } catch { /* page may already be closed */ }
   console.log(`[ycombinator] Total: ${jobs.length} jobs (${seenUrls.size} unique)`);
-  return { source: SOURCE, jobs, errors };
+  return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
 }

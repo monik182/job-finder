@@ -1,6 +1,7 @@
 import { type Browser, type Page } from 'puppeteer-core';
-import { type RawJob, type ScrapeResult } from '../types.js';
+import { type RawJob, type ScrapeResult, type InlineFilterStats } from '../types.js';
 import { type AppConfig, type ExperienceLevel, getSearchTerms } from '../config.js';
+import { type InlineJobFilter } from '../filters/inline-filter.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 
 const SOURCE = 'anywhere-remote' as const;
@@ -66,6 +67,7 @@ async function scrapeOneCombination(
   scrapedAt: string,
   errors: string[],
   onProgress?: (newJobs: RawJob[]) => void,
+  inlineFilter?: InlineJobFilter,
 ): Promise<RawJob[]> {
   const jobs: RawJob[] = [];
   const maxPages = config.scraping.maxPages;
@@ -143,12 +145,17 @@ async function scrapeOneCombination(
           source: SOURCE,
           scrapedAt,
         };
+
+        if (inlineFilter && !inlineFilter.check(job)) continue;
+
         jobs.push(job);
         batchJobs.push(job);
       }
 
       if (batchJobs.length > 0) onProgress?.(batchJobs);
       console.log(`[anywhere-remote] Page ${pageNum}: ${rawJobs.length} listings`);
+
+      if (jobs.length >= config.scraping.maxJobs) break;
 
       const nextUrl = await page.evaluate((nextSel: string, baseUrl: string): string | null => {
         const nextBtn = document.querySelector(nextSel);
@@ -173,10 +180,13 @@ async function scrapeOneCombination(
   return jobs;
 }
 
+const EMPTY_INLINE_STATS: InlineFilterStats = { skippedAsSeen: 0, skippedByHardExclusion: 0, excludedJobs: [] };
+
 export async function scrapeAnywhereRemote(
   browser: Browser,
   config: AppConfig,
   onProgress?: (newJobs: RawJob[]) => void,
+  inlineFilter?: InlineJobFilter,
 ): Promise<ScrapeResult> {
   const jobs: RawJob[] = [];
   const errors: string[] = [];
@@ -200,7 +210,7 @@ export async function scrapeAnywhereRemote(
         const page = await newPage(browser);
         try {
           const newJobs = await scrapeOneCombination(
-            page, country, skill, exp, config, seenUrls, scrapedAt, errors, onProgress,
+            page, country, skill, exp, config, seenUrls, scrapedAt, errors, onProgress, inlineFilter,
           );
           jobs.push(...newJobs);
         } finally {
@@ -211,5 +221,5 @@ export async function scrapeAnywhereRemote(
   }
 
   console.log(`[anywhere-remote] Total: ${jobs.length} jobs (${seenUrls.size} unique)`);
-  return { source: SOURCE, jobs, errors };
+  return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
 }

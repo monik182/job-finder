@@ -152,6 +152,70 @@ function isPostedWithinWindow(datePosted: string | null, scrapedAt: string, hour
   return scraped - posted <= windowMs;
 }
 
+// ─── Hard exclusion context (shared by inline filter and full filter) ─────────
+
+export interface HardExclusionContext {
+  excludedCompaniesLower: string[];
+  excludeSkillsRegex: RegExp | null;
+  hoursWindow: number;
+}
+
+export function buildHardExclusionContext(config: AppConfig): HardExclusionContext {
+  return {
+    excludedCompaniesLower: config.filters.excludedCompanies.map((c) => c.toLowerCase()),
+    excludeSkillsRegex: config.filters.excludeSkills.length > 0
+      ? buildSkillsRegex(config.filters.excludeSkills)
+      : null,
+    hoursWindow: getHoursWindow(config),
+  };
+}
+
+/**
+ * Runs Pass 1 hard exclusions + the too-old check on a single job.
+ * Returns an array of exclusion reason strings. Empty array = job passes.
+ */
+export function getHardExclusionReasons(
+  job: RawJob,
+  config: AppConfig,
+  ctx: HardExclusionContext,
+): string[] {
+  const { filters } = config;
+  const combined = `${job.title} ${job.description}`;
+  const fullText = `${job.location} ${combined}`;
+  const reasons: string[] = [];
+
+  if (filters.excludeUsOnly && EXCLUDE_US_ONLY.test(combined)) reasons.push('us-only');
+  if (filters.excludeClearance && EXCLUDE_CLEARANCE.test(combined)) reasons.push('clearance-required');
+
+  for (const [level, pattern] of Object.entries(EXPERIENCE_PATTERNS) as [ExperienceLevel, RegExp][]) {
+    if (!filters.experience.includes(level) && pattern.test(job.title)) {
+      reasons.push(`experience-${level}`);
+      break;
+    }
+  }
+  if (filters.excludeOnSite && EXCLUDE_ON_SITE.test(combined)) reasons.push('on-site');
+  if (filters.excludeHybrid && EXCLUDE_HYBRID.test(combined)) reasons.push('hybrid');
+  if (filters.excludeIndia && EXCLUDE_INDIA.test(fullText)) reasons.push('india-market');
+  if (filters.excludeUae && EXCLUDE_UAE.test(fullText)) reasons.push('uae-gulf-market');
+  if (filters.excludeSoutheastAsia && EXCLUDE_SEA.test(fullText)) reasons.push('southeast-asia');
+
+  if (
+    ctx.excludedCompaniesLower.length > 0 &&
+    ctx.excludedCompaniesLower.includes(job.company.toLowerCase())
+  ) {
+    reasons.push('excluded-company');
+  }
+
+  if (ctx.excludeSkillsRegex?.test(combined)) reasons.push('excluded-skill');
+  if (filters.excludeEquityOnly && EXCLUDE_EQUITY_ONLY.test(combined)) reasons.push('equity-only');
+  if (filters.excludeCrypto && EXCLUDE_CRYPTO.test(fullText)) reasons.push('crypto');
+
+  // too-old check (from Pass 2, but cheap and high-value to run early)
+  if (!isPostedWithinWindow(job.datePosted, job.scrapedAt, ctx.hoursWindow)) reasons.push('too-old');
+
+  return reasons;
+}
+
 // ─── Main filter ──────────────────────────────────────────────────────────────
 
 export interface FilterResult {
@@ -164,57 +228,26 @@ export function filterJobs(jobs: RawJob[], config: AppConfig): FilterResult {
   const excluded: ExcludedJob[] = [];
   const excludedAt = new Date().toISOString();
 
-  const hoursWindow = getHoursWindow(config);
   const { filters } = config;
+  const ctx = buildHardExclusionContext(config);
 
   const skillsRegex = buildSkillsRegex(filters.skills);
   const jobTitleRegex = buildJobTitleRegex(filters.jobTitle);
 
-  const excludedCompaniesLower = filters.excludedCompanies.map((c) => c.toLowerCase());
-  const excludeSkillsRegex = filters.excludeSkills.length > 0
-    ? buildSkillsRegex(filters.excludeSkills)
-    : null;
-
   for (const job of jobs) {
     const combined = `${job.title} ${job.description}`;
     const locationCombined = `${job.location} ${job.description}`;
-    const fullText = `${job.location} ${combined}`;
     const exclusionReasons: string[] = [];
 
-    // ── Pass 1: Hard exclusions ────────────────────────────────────────────
-    if (filters.excludeUsOnly && EXCLUDE_US_ONLY.test(combined)) exclusionReasons.push('us-only');
-    if (filters.excludeClearance && EXCLUDE_CLEARANCE.test(combined)) exclusionReasons.push('clearance-required');
+    // ── Pass 1: Hard exclusions + too-old ──────────────────────────────────
+    exclusionReasons.push(...getHardExclusionReasons(job, config, ctx));
 
-    for (const [level, pattern] of Object.entries(EXPERIENCE_PATTERNS) as [ExperienceLevel, RegExp][]) {
-      if (!filters.experience.includes(level) && pattern.test(job.title)) {
-        exclusionReasons.push(`experience-${level}`);
-        break;
-      }
-    }
-    if (filters.excludeOnSite && EXCLUDE_ON_SITE.test(combined)) exclusionReasons.push('on-site');
-    if (filters.excludeHybrid && EXCLUDE_HYBRID.test(combined)) exclusionReasons.push('hybrid');
-    if (filters.excludeIndia && EXCLUDE_INDIA.test(fullText)) exclusionReasons.push('india-market');
-    if (filters.excludeUae && EXCLUDE_UAE.test(fullText)) exclusionReasons.push('uae-gulf-market');
-    if (filters.excludeSoutheastAsia && EXCLUDE_SEA.test(fullText)) exclusionReasons.push('southeast-asia');
-
-    if (
-      excludedCompaniesLower.length > 0 &&
-      excludedCompaniesLower.includes(job.company.toLowerCase())
-    ) {
-      exclusionReasons.push('excluded-company');
-    }
-
-    if (excludeSkillsRegex?.test(combined)) exclusionReasons.push('excluded-skill');
-    if (filters.excludeEquityOnly && EXCLUDE_EQUITY_ONLY.test(combined)) exclusionReasons.push('equity-only');
-    if (filters.excludeCrypto && EXCLUDE_CRYPTO.test(fullText)) exclusionReasons.push('crypto');
-
-    // ── Pass 2: Required inclusions ────────────────────────────────────────
+    // ── Pass 2: Required inclusions (remaining checks) ─────────────────────
     const skillsMatch = skillsRegex.test(combined);
     const jobTitleMatch = jobTitleRegex.test(combined);
     if (!skillsMatch && !jobTitleMatch) exclusionReasons.push('no-skills-or-title-match');
 
     if (filters.remote && !INCLUDE_REMOTE.test(locationCombined)) exclusionReasons.push('not-remote');
-    if (!isPostedWithinWindow(job.datePosted, job.scrapedAt, hoursWindow)) exclusionReasons.push('too-old');
 
     if (filters.contractTypes.length > 0) {
       const hasMatch = filters.contractTypes.some((ct) => CONTRACT_TYPE_PATTERNS[ct].test(combined));

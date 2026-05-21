@@ -43,10 +43,17 @@ export interface ExcludedJobsStore {
   jobs: ExcludedJob[];
 }
 
+export interface InlineFilterStats {
+  skippedAsSeen: number;
+  skippedByHardExclusion: number;
+  excludedJobs: ExcludedJob[];
+}
+
 export interface ScrapeResult {
   source: JobSource;
   jobs: RawJob[];
   errors: string[];
+  inlineStats: InlineFilterStats;
 }
 
 export interface EmailReport {

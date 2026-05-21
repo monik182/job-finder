@@ -2,8 +2,9 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type Browser, type Page, type CookieParam } from 'puppeteer-core';
-import { type RawJob, type ScrapeResult } from '../types.js';
+import { type RawJob, type ScrapeResult, type InlineFilterStats } from '../types.js';
 import { type AppConfig, type GeoLocation, type ExperienceLevel, type ContractType, getSearchTerms } from '../config.js';
+import { type InlineJobFilter } from '../filters/inline-filter.js';
 import { newPage, delay, safeGoto, parseRelativeDate } from './utils.js';
 import { getBrowser, closeBrowser } from '../browser.js';
 
@@ -90,6 +91,7 @@ const SEL = {
   jobListItems: 'main#main ul li',
   // Job detail panel
   detailTitle: 'div.job-details-jobs-unified-top-card__job-title h1 a',
+  detailDate: 'div.job-details-jobs-unified-top-card__primary-description-container > div > span span:nth-child(3)',
   detailCompany: '.job-details-jobs-unified-top-card__company-name a',
   detailLocation: '.job-details-jobs-unified-top-card__bullet',
   detailDescription: 'div.jobs-description__content.jobs-description-content',
@@ -148,10 +150,13 @@ function isDetachedError(err: unknown): boolean {
   return /detached Frame|Target closed|Session closed|Protocol error|frame was detached/i.test(msg);
 }
 
+const EMPTY_INLINE_STATS: InlineFilterStats = { skippedAsSeen: 0, skippedByHardExclusion: 0, excludedJobs: [] };
+
 export async function scrapeLinkedIn(
   browser: Browser,
   config: AppConfig,
   onProgress?: (newJobs: RawJob[]) => void,
+  inlineFilter?: InlineJobFilter,
 ): Promise<ScrapeResult> {
   const jobs: RawJob[] = [];
   const errors: string[] = [];
@@ -165,6 +170,7 @@ export async function scrapeLinkedIn(
       source: SOURCE,
       jobs,
       errors: ['[linkedin] LINKEDIN_EMAIL or LINKEDIN_PASSWORD not set in environment'],
+      inlineStats: EMPTY_INLINE_STATS,
     };
   }
 
@@ -323,7 +329,7 @@ export async function scrapeLinkedIn(
     if (!loginSucceeded) {
       errors.push(lastLoginError);
       await page.close();
-      return { source: SOURCE, jobs, errors };
+      return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
     }
   }
 
@@ -354,7 +360,7 @@ export async function scrapeLinkedIn(
             errors.push('[linkedin] Stopping: could not refresh session');
             try { await page.close(); } catch { /* ignore */ }
             console.log(`[linkedin] Total: ${jobs.length} jobs (${seenUrls.size} unique)`);
-            return { source: SOURCE, jobs, errors };
+            return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
           }
         }
         searchCount++;
@@ -385,7 +391,7 @@ export async function scrapeLinkedIn(
             console.warn(msg);
             errors.push(msg);
             try { await page.close(); } catch { /* ignore */ }
-            return { source: SOURCE, jobs, errors };
+            return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
           }
 
           await moveMouse(page);
@@ -513,8 +519,10 @@ export async function scrapeLinkedIn(
                       document.querySelector(selectors.detailLocation)?.textContent?.trim() ?? '';
                     const description =
                       document.querySelector(selectors.detailDescription)?.textContent?.trim().slice(0, 3000) ?? '';
+                    const detailDateText =
+                      document.querySelector(selectors.detailDate)?.textContent?.trim() ?? '';
 
-                    return { title, url, company, location, description };
+                    return { title, url, company, location, description, detailDateText };
                   },
                   SEL,
                   LI_BASE_URL,
@@ -535,12 +543,15 @@ export async function scrapeLinkedIn(
                 title: jobData.title,
                 company: jobData.company,
                 location: jobData.location,
-                datePosted: parseRelativeDate(dateIso),
+                datePosted: parseRelativeDate(jobData.detailDateText) ?? parseRelativeDate(dateIso) ?? new Date().toISOString(),
                 url: jobData.url,
                 description: jobData.description,
                 source: SOURCE,
                 scrapedAt,
               };
+
+              if (inlineFilter && !inlineFilter.check(job)) continue;
+
               jobs.push(job);
               batchJobs.push(job);
 
@@ -583,7 +594,7 @@ export async function scrapeLinkedIn(
             const recovered = await recoverPage();
             if (!recovered) {
               console.warn('[linkedin] Recovery failed — stopping scrape');
-              return { source: SOURCE, jobs, errors };
+              return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
             }
           }
         }
@@ -599,5 +610,5 @@ export async function scrapeLinkedIn(
 
   try { await page.close(); } catch { /* ignore */ }
   console.log(`[linkedin] Total: ${jobs.length} jobs (${seenUrls.size} unique)`);
-  return { source: SOURCE, jobs, errors };
+  return { source: SOURCE, jobs, errors, inlineStats: inlineFilter?.stats ?? EMPTY_INLINE_STATS };
 }
