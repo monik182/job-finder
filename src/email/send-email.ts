@@ -177,10 +177,11 @@ export async function sendEmail(report: EmailReport): Promise<void> {
 
   const resend = new Resend(apiKey);
 
+  const sourceLabel = report.source ? SOURCE_LABELS[report.source] : 'All Sources';
   const subject =
     report.totalNew > 0
-      ? `🔍 Job Search Results - ${report.date} - ${report.totalStrong} strong, ${report.totalWeak} other`
-      : `No new jobs today. Keep going 💪`;
+      ? `🔍 [${sourceLabel}] Job Search Results - ${report.date} - ${report.totalStrong} strong, ${report.totalWeak} other`
+      : `[${sourceLabel}] No new jobs today. Keep going 💪`;
 
   const html =
     report.totalNew > 0 ? buildHtmlEmail(report) : buildNoJobsEmail(report.date);

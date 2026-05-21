@@ -167,6 +167,7 @@ async function main(): Promise<void> {
       weakBySource: groupBySource(weakJobs),
       date: getDate(),
       scraperErrors: allErrors,
+      source: sourceArg,
     };
 
     // Persist updated seen-jobs.json

@@ -66,4 +66,5 @@ export interface EmailReport {
   weakBySource: Partial<Record<JobSource, AIClassifiedJob[]>>;
   date: string;
   scraperErrors: string[];
+  source?: JobSource;
 }
