@@ -1,14 +1,14 @@
 {
   "scraping": {
     "maxPages": 2,
-    "maxJobs": 20,
+    "maxJobs": 10,
     "maxAgeDays": 7,
     "minDelayMs": 1000
   },
   "filters": {
     "geoLocations": ["worldwide", "europe"],
     "skills": ["react"],
-    "jobTitle": ["frontend", "front-end", "fullstack", "full-stack", "web developer"],
+    "jobTitle": ["frontend"],
     "excludedCompanies": ["micro1", "proxify", "epam"],
     "excludeUsOnly": true,
     "excludeIndia": true,

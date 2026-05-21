@@ -20,6 +20,14 @@ const RAW_JOBS_PATH = resolve(__dirname, '..', 'raw-jobs.json');
 const EXCLUDED_JOBS_PATH = resolve(__dirname, '..', 'excluded-jobs.json');
 const RUNS_LOG_PATH = resolve(__dirname, '..', 'runs.log');
 
+const VALID_SOURCES: JobSource[] = ['linkedin', 'anywhere-remote', 'working-nomads', 'ycombinator'];
+const sourceArg = process.argv.find((a) => a.startsWith('--source='))?.slice('--source='.length) as JobSource | undefined;
+if (sourceArg && !VALID_SOURCES.includes(sourceArg)) {
+  console.error(`Invalid --source value: "${sourceArg}". Valid options: ${VALID_SOURCES.join(', ')}`);
+  process.exit(1);
+}
+const shouldScrape = (source: JobSource): boolean => !sourceArg || sourceArg === source;
+
 function validateEnv(): void {
   const required = ['BROWSERLESS_API_KEY', 'RESEND_API_KEY', 'MY_EMAIL', 'FROM_EMAIL'];
   const missing = required.filter((k) => !process.env[k]);
@@ -71,17 +79,27 @@ async function main(): Promise<void> {
       saveRawJobs(RAW_JOBS_PATH, allRawJobs);
     };
 
-    console.log('\n[main] Scraping LinkedIn...');
-    try { results.push(await withFreshBrowser((b) => scrapeLinkedIn(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] LinkedIn failed:', e); }
+    if (sourceArg) console.log(`[main] Running single source: ${sourceArg}`);
 
-    console.log('\n[main] Scraping Anywhere Remote Jobs...');
-    try { results.push(await withFreshBrowser((b) => scrapeAnywhereRemote(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
+    if (shouldScrape('linkedin')) {
+      console.log('\n[main] Scraping LinkedIn...');
+      try { results.push(await withFreshBrowser((b) => scrapeLinkedIn(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] LinkedIn failed:', e); }
+    }
 
-    console.log('\n[main] Scraping Working Nomads...');
-    try { results.push(await withFreshBrowser((b) => scrapeWorkingNomads(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] Working Nomads failed:', e); }
+    if (shouldScrape('anywhere-remote')) {
+      console.log('\n[main] Scraping Anywhere Remote Jobs...');
+      try { results.push(await withFreshBrowser((b) => scrapeAnywhereRemote(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] Anywhere Remote failed:', e); }
+    }
 
-    console.log('\n[main] Scraping Work at a Startup (YC)...');
-    try { results.push(await withFreshBrowser((b) => scrapeYCombinator(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] YCombinator failed:', e); }
+    if (shouldScrape('working-nomads')) {
+      console.log('\n[main] Scraping Working Nomads...');
+      try { results.push(await withFreshBrowser((b) => scrapeWorkingNomads(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] Working Nomads failed:', e); }
+    }
+
+    if (shouldScrape('ycombinator')) {
+      console.log('\n[main] Scraping Work at a Startup (YC)...');
+      try { results.push(await withFreshBrowser((b) => scrapeYCombinator(b, config, checkpoint, inlineFilter))); } catch (e) { console.error('[main] YCombinator failed:', e); }
+    }
 
     results.forEach((r) => allErrors.push(...r.errors));
 

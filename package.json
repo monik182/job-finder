@@ -7,6 +7,10 @@
     "start": "node --loader ts-node/esm src/index.ts",
     "dev": "NODE_ENV=development node --loader ts-node/esm --env-file=.env src/index.ts",
     "dev:headed": "NODE_ENV=development HEADED=true node --loader ts-node/esm --env-file=.env src/index.ts",
+    "dev:linkedin": "NODE_ENV=development node --loader ts-node/esm --env-file=.env src/index.ts --source=linkedin",
+    "dev:anywhere-remote": "NODE_ENV=development node --loader ts-node/esm --env-file=.env src/index.ts --source=anywhere-remote",
+    "dev:working-nomads": "NODE_ENV=development node --loader ts-node/esm --env-file=.env src/index.ts --source=working-nomads",
+    "dev:ycombinator": "NODE_ENV=development node --loader ts-node/esm --env-file=.env src/index.ts --source=ycombinator",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
