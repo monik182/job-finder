@@ -209,6 +209,7 @@ export function getHardExclusionReasons(
   if (ctx.excludeSkillsRegex?.test(combined)) reasons.push('excluded-skill');
   if (filters.excludeEquityOnly && EXCLUDE_EQUITY_ONLY.test(combined)) reasons.push('equity-only');
   if (filters.excludeCrypto && EXCLUDE_CRYPTO.test(fullText)) reasons.push('crypto');
+  if (filters.excludeReposted && job.isReposted) reasons.push('reposted');
 
   // too-old check (from Pass 2, but cheap and high-value to run early)
   if (!isPostedWithinWindow(job.datePosted, job.scrapedAt, ctx.hoursWindow)) reasons.push('too-old');

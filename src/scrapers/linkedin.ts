@@ -95,6 +95,7 @@ const SEL = {
   detailCompany: '.job-details-jobs-unified-top-card__company-name a',
   detailLocation: '.job-details-jobs-unified-top-card__bullet',
   detailDescription: 'div.jobs-description__content.jobs-description-content',
+  detailTopCard: 'div.job-details-jobs-unified-top-card__primary-description-container',
   // Pagination
   paginationContainer: 'div.jobs-search-pagination.jobs-search-results-list__pagination',
   paginationNext: 'button.jobs-search-pagination__button.jobs-search-pagination__button--next',
@@ -522,7 +523,10 @@ export async function scrapeLinkedIn(
                     const detailDateText =
                       document.querySelector(selectors.detailDate)?.textContent?.trim() ?? '';
 
-                    return { title, url, company, location, description, detailDateText };
+                    const topCard = document.querySelector(selectors.detailTopCard);
+                    const isReposted = topCard ? /\breposted\b/i.test(topCard.textContent ?? '') : false;
+
+                    return { title, url, company, location, description, detailDateText, isReposted };
                   },
                   SEL,
                   LI_BASE_URL,
@@ -548,6 +552,7 @@ export async function scrapeLinkedIn(
                 description: jobData.description,
                 source: SOURCE,
                 scrapedAt,
+                isReposted: jobData.isReposted || undefined,
               };
 
               if (inlineFilter && !inlineFilter.check(job)) continue;

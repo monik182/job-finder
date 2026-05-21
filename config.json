@@ -19,6 +19,7 @@
     "experience": ["senior", "mid"],
     "excludeOnSite": true,
     "excludeHybrid": true,
+    "excludeReposted": true,
     "remote": true,
     "salary": {
       "hour": null,

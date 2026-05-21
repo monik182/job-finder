@@ -136,6 +136,7 @@ Produced by all scrapers, consumed by filters.
   description: string;          // Job description text or tag list
   source: JobSource;
   scrapedAt: string;            // ISO 8601 timestamp
+  isReposted?: boolean;         // True if job detected as reposted/republished
 }
 ```
 
@@ -276,6 +277,7 @@ One JSON line appended to `runs.log` per production run.
     "excludeHybrid": true,
     "excludeEquityOnly": true,             // Blocks equity-only / unpaid roles
     "excludeCrypto": true,                 // Blocks crypto/blockchain/DeFi jobs
+    "excludeReposted": true,              // Blocks reposted/republished job listings
     "excludedCompanies": ["micro1"],       // Case-insensitive company name matches
     "excludeSkills": [".net", "java"],     // Terms to block in title/description
     "salary": {
@@ -489,6 +491,7 @@ Three sequential passes. Each excluded job records its `reasons[]`.
 | `excluded-skill` | `excludeSkills[]` | Term found in title or description |
 | `equity-only` | `excludeEquityOnly` | Equity-only / unpaid role patterns |
 | `crypto` | `excludeCrypto` | Crypto/blockchain/DeFi terms + coin symbols |
+| `reposted` | `excludeReposted` | Job flagged as reposted by the source platform |
 | `too-old` | derived from `maxAgeDays` | `datePosted` outside time window |
 
 ### Pass 2: Required Inclusions
@@ -587,7 +590,7 @@ Steps: Checkout → Node.js 20 → `npm ci` → (LinkedIn: restore cookies) → 
 ```
 us-only, clearance-required, experience-{level}, on-site, hybrid,
 india-market, uae-gulf-market, southeast-asia, excluded-company,
-excluded-skill, equity-only, crypto, too-old,
+excluded-skill, equity-only, crypto, reposted, too-old,
 no-skills-or-title-match, not-remote, no-contract-type,
 salary-below-minimum, ai-filter
 ```

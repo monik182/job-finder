@@ -102,6 +102,7 @@ Edit `config.json` to customize search and filter behavior:
     "excludeHybrid": true,
     "excludeEquityOnly": true,
     "excludeCrypto": true,
+    "excludeReposted": true,                 // Blocks reposted/republished job listings
     "excludedCompanies": ["micro1"],
     "excludeSkills": [".net", "java"],
     "salary": { "hour": null, "month": null, "annual": null },

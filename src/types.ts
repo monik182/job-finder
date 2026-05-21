@@ -9,6 +9,7 @@ export interface RawJob {
   description: string;
   source: JobSource;
   scrapedAt: string;
+  isReposted?: boolean;
 }
 
 export interface FilteredJob extends RawJob {

@@ -53,6 +53,7 @@ interface RawJobData {
   url: string;
   location: string;
   description: string;
+  isReposted: boolean;
 }
 
 function buildJobsUrl(config: AppConfig, skill: string): string {
@@ -160,8 +161,10 @@ export async function scrapeWorkingNomads(
               const location = boxTexts[0] ?? 'Remote';
               const description = boxTexts.join(', ');
 
+              const isReposted = /\breposted\b/i.test(item.textContent ?? '');
+
               if (title && url) {
-                results.push({ title, company, dateText, url, location, description });
+                results.push({ title, company, dateText, url, location, description, isReposted });
               }
             });
 
@@ -185,6 +188,7 @@ export async function scrapeWorkingNomads(
             description: raw.description,
             source: SOURCE,
             scrapedAt,
+            isReposted: raw.isReposted || undefined,
           };
 
           if (inlineFilter && !inlineFilter.check(job)) continue;
