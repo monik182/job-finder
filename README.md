@@ -1,249 +1,169 @@
-# job-finder
+# Job Finder
 
-Daily job search automation that scrapes three job boards and emails a filtered digest of remote developer positions.
+Automated daily job search that scrapes multiple job boards, filters results with configurable rules, classifies matches using AI, and sends curated email digests.
 
-## How it works
+## How It Works
 
-1. Runs every morning at **6:02 AM UTC** (7:02 AM CET / 8:02 AM CEST) via GitHub Actions
-2. Scrapes **LinkedIn**, **Work at a Startup (YC)**, and **Anywhere Remote Jobs** via [Browserless](https://browserless.io)
-3. Filters results based on `config.json` — skills, location, experience, contract type, and more
-4. Deduplicates against previously seen jobs stored in `seen-jobs.json`
-5. Sends a clean HTML digest email via [Resend](https://resend.com)
-6. Commits the updated `seen-jobs.json` back to the repo
+1. **Scrape** 4 job boards via headless browser (LinkedIn, YC/Work at a Startup, Anywhere Remote Jobs, Working Nomads)
+2. **Filter** using configurable rules — skills, location, experience, salary, exclusions — with inline filtering during scraping for efficiency
+3. **Deduplicate** against previously seen jobs (SHA-256 hashes persisted in `seen-jobs.json`)
+4. **Classify** with AI (Claude Haiku) into strong/weak/excluded matches
+5. **Email** a curated HTML digest via Resend, with strong and weaker matches separated
+6. **Persist** state back to the repo via GitHub Actions
+
+Runs daily at 4:02 AM UTC via GitHub Actions cron, or on-demand via `workflow_dispatch`.
 
 ## Setup
 
-### 1. Clone and install
+### Prerequisites
+
+- Node.js 20+
+- A [Browserless.io](https://www.browserless.io/) account (production) or local Chrome (dev)
+- A [Resend](https://resend.com/) account with a verified sender domain
+- (Optional) An [Anthropic](https://www.anthropic.com/) API key for AI classification
+
+### Environment Variables
+
+Create a `.env` file for local development:
+
+```env
+# Required
+BROWSERLESS_API_KEY=your_browserless_key
+RESEND_API_KEY=re_your_resend_key
+MY_EMAIL=you@example.com
+FROM_EMAIL=jobs@yourdomain.com
+
+# Optional — AI classification (without this, all jobs default to "strong")
+ANTHROPIC_API_KEY=sk-ant-your_key
+
+# Optional — LinkedIn (without these, LinkedIn scraping is skipped)
+LINKEDIN_EMAIL=your@email.com
+LINKEDIN_PASSWORD=your_password
+
+# Optional — YC / Work at a Startup
+YC_EMAIL=your@email.com
+YC_PASSWORD=your_password
+```
+
+### Install & Run
 
 ```bash
-git clone https://github.com/monik182/job-finder.git
-cd job-finder
 npm install
-```
 
-### 2. Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and fill in:
-
-| Variable | Description |
-|---|---|
-| `BROWSERLESS_API_KEY` | Your [Browserless](https://browserless.io) API key |
-| `RESEND_API_KEY` | Your [Resend](https://resend.com) API key (`re_...`) |
-| `MY_EMAIL` | Your email address (where results are sent) |
-| `FROM_EMAIL` | Sender address (must be a verified Resend domain, e.g. `jobs@yourdomain.com`) |
-
-### 3. Add GitHub Secrets
-
-In your repo go to **Settings → Secrets and variables → Actions** and add:
-
-- `BROWSERLESS_API_KEY`
-- `RESEND_API_KEY`
-- `MY_EMAIL`
-- `FROM_EMAIL`
-
-### 4. Configure `config.json`
-
-Edit `config.json` at the project root to set your search preferences (skills, locations, filters). See the [Configuration](#configuration) section below.
-
-### 5. Run locally
-
-```bash
+# Run all scrapers in dev mode
 npm run dev
-```
 
-> **Note:** Use `npm run dev` (not `npm start`) locally — it loads your `.env` file via Node's `--env-file` flag. `npm start` skips `.env` and is used by GitHub Actions, where secrets are injected directly into the environment.
+# Run a single scraper
+npm run dev:linkedin
+npm run dev:anywhere-remote
+npm run dev:working-nomads
+npm run dev:ycombinator
 
-You can also override the time window at runtime:
-
-```bash
+# Override time window (hours)
 npm run dev -- --hours=48
-```
+npm run dev:linkedin -- --hours=24
 
-### 5. Trigger manually in GitHub Actions
+# Dev with visible browser
+npm run dev:headed
 
-Go to **Actions → Daily Job Search → Run workflow**.
+# Production (no .env, secrets from environment)
+npm start
 
-## Project structure
-
-```
-src/
-  index.ts                  Main orchestrator
-  types.ts                  Shared TypeScript interfaces
-  browser.ts                Browserless WebSocket connection
-  scrapers/
-    utils.ts                Shared scraper helpers
-    linkedin.ts             LinkedIn public job search
-    ycombinator.ts          Work at a Startup (YC)
-    anywhere-remote.ts      Anywhere Remote Jobs
-  filters/
-    filter-jobs.ts          Filtering and priority flagging logic
-  dedup/
-    dedup.ts                SHA-256 deduplication against seen-jobs.json
-  email/
-    send-email.ts           Resend integration + HTML email template
-seen-jobs.json              Tracks previously emailed jobs (committed to repo)
-.github/workflows/
-  job-search.yml            Daily GitHub Actions schedule
+# Type check
+npm run typecheck
 ```
 
 ## Configuration
 
-All scraping and filtering behaviour is controlled by `config.json` at the project root. No code changes needed — just edit the file and re-run.
+Edit `config.json` to customize search and filter behavior:
 
----
-
-### `scraping`
-
-Global limits applied to every scraper.
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `maxPages` | `number` | `1` | Max pages to paginate per search query |
-| `maxJobs` | `number` | `10` | Max jobs to collect per search query / combination |
-| `maxAgeDays` | `number` | `7` | Only keep jobs posted within this many days. Also sets LinkedIn's `f_TPR` time filter. Override at runtime with `--hours=N` |
-
----
-
-### `filters`
-
-#### Search scope
-
-| Field | Type | Description |
-|---|---|---|
-| `geoLocations` | `("latam" \| "usa" \| "europe" \| "worldwide")[]` | Regions to search. Drives scraper URLs directly — LinkedIn geoId and Anywhere Remote country param. YC does not support geo filtering. |
-| `skills` | `string[]` | Tech skills used as **search query terms** in scrapers AND matched against job text. Must have at least one entry. |
-| `jobTitle` | `string[]` | Job title variations (e.g. `"frontend"`, `"front-end"`). A job passes if its text matches any skill **or** any job title. Must have at least one entry. |
-
-**Geo location mapping:**
-
-| Value | LinkedIn geoId | Anywhere Remote |
-|---|---|---|
-| `latam` | `91000011` — Latin America | `LATAM` |
-| `usa` | `103644278` — United States | `United States` |
-| `europe` | `91000000` — European Union | `European Union` |
-| `worldwide` | `92000000` — Worldwide | `Worldwide` |
-
----
-
-#### Experience & contract
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `experience` | `ExperienceLevel[]` | `["mid", "senior"]` | Allowed experience levels. Jobs with titles matching a level **not** in this list are excluded. Also sets LinkedIn `f_E` and Anywhere Remote `experience` URL params. |
-| `contractTypes` | `ContractType[]` | `[]` | Allowed contract types. Empty = no filter. If non-empty, job text must match at least one type. Also sets LinkedIn `f_JT`. |
-| `language` | `string[]` | `["english"]` | Accepted job posting languages. If `"spanish"` is absent, jobs with Spanish-language markers in the text are excluded. |
-
-**Experience levels:** `"junior"` · `"mid"` · `"senior"` · `"lead"` · `"staff"` · `"principal"` · `"director"` · `"c-level"`
-
-**Contract types:** `"full-time"` · `"part-time"` · `"contract"` · `"freelance"` · `"temporary"`
-
-**Experience → LinkedIn `f_E` mapping:**
-
-| Config level | LinkedIn code |
-|---|---|
-| `junior` | 1, 2 (Internship, Entry Level) |
-| `mid` | 3, 4 (Associate, Mid-Senior) |
-| `senior` / `lead` / `staff` / `principal` | 4 (Mid-Senior) |
-| `director` | 5 |
-| `c-level` | 6 (Executive) |
-
----
-
-#### Hard exclusions
-
-Boolean flags — set to `false` to disable. All default to `true`.
-
-| Field | Excludes jobs that… |
-|---|---|
-| `excludeUsOnly` | Require US citizenship or work authorization |
-| `excludeIndia` | Mention India, Indian cities, or ₹ |
-| `excludeUae` | Mention UAE, Gulf countries, Saudi Arabia, Qatar, Kuwait, Bahrain, or Oman |
-| `excludeSoutheastAsia` | Mention SEA countries (Vietnam, Thailand, Indonesia, Philippines, Malaysia, Singapore, Myanmar, Cambodia, Laos, Brunei, Timor) or their currencies |
-| `excludeClearance` | Require security clearance |
-| `excludeOnSite` | Mention on-site, in-office, in-person, or must relocate |
-| `excludeHybrid` | Mention hybrid |
-| `remote` | Do not include "remote" in location or description |
-
----
-
-#### List exclusions
-
-| Field | Type | Description |
-|---|---|---|
-| `excludedCompanies` | `string[]` | Company names to skip (case-insensitive match). |
-| `excludeSkills` | `string[]` | Skills to block. Jobs mentioning any of these in title or description are excluded (e.g. `[".net", "java", "c#"]`). |
-
----
-
-#### Salary
-
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `salary.hour` | `number \| null` | `null` | Minimum hourly rate. Jobs listing a salary **below** this are excluded. Jobs with no salary info are not affected. |
-| `salary.month` | `number \| null` | `null` | Minimum monthly rate. Same logic. |
-| `salary.annual` | `number \| null` | `null` | Minimum annual salary. Same logic. |
-| `prioritySalary.hourMin` | `number` | `40` | Hourly threshold for flagging a job as high-priority (shown first in email). |
-| `prioritySalary.annualMin` | `number` | `80000` | Annual threshold for flagging a job as high-priority. |
-
----
-
-#### High-priority flags
-
-Jobs passing all filters are additionally checked for priority signals (surfaced first in the email digest):
-
-- Salary ≥ `prioritySalary.hourMin`/hr or ≥ `prioritySalary.annualMin`/year
-- Explicitly contractor or freelance
-- Mentions AI, OpenAI, LLM, automation, or n8n
-- Company size 50–499 employees
-
----
-
-### Full `config.json` example
-
-```json
+```jsonc
 {
   "scraping": {
-    "maxPages": 1,
-    "maxJobs": 10,
-    "maxAgeDays": 7
+    "maxPages": 2,              // Max result pages per search query
+    "maxJobs": 10,              // Max jobs per search combination
+    "maxAgeDays": 7,            // Job age cutoff (overridable with --hours=N)
+    "minDelayMs": 1000          // Minimum delay between scraping actions
   },
   "filters": {
-    "geoLocations": ["latam", "europe"],
-    "skills": ["react", "angular", "typescript", "next.js", "node.js"],
-    "jobTitle": ["frontend", "front-end", "fullstack", "full-stack"],
-    "excludedCompanies": [],
-    "excludeSkills": [".net", "java", "c#", "php"],
+    "geoLocations": ["worldwide", "europe"],  // latam | usa | europe | worldwide
+    "skills": ["react"],                       // Search terms + inclusion matching
+    "jobTitle": ["frontend"],                  // Inclusion matching
+    "experience": ["mid", "senior"],           // junior|mid|senior|lead|staff|principal|director|c-level
+    "contractTypes": [],                       // Empty = all. full-time|part-time|contract|freelance|temporary
+    "language": ["english", "spanish"],        // Used by AI filter for language matching
+    "remote": true,
     "excludeUsOnly": true,
     "excludeIndia": true,
     "excludeUae": true,
     "excludeSoutheastAsia": true,
     "excludeClearance": true,
-    "experience": ["mid", "senior"],
     "excludeOnSite": true,
     "excludeHybrid": true,
-    "remote": true,
-    "language": ["english"],
-    "salary": {
-      "hour": null,
-      "month": null,
-      "annual": null
-    },
-    "contractTypes": [],
-    "prioritySalary": {
-      "hourMin": 40,
-      "annualMin": 80000
-    }
+    "excludeEquityOnly": true,
+    "excludeCrypto": true,
+    "excludedCompanies": ["micro1"],
+    "excludeSkills": [".net", "java"],
+    "salary": { "hour": null, "month": null, "annual": null },
+    "prioritySalary": { "hourMin": 40, "annualMin": 80000 }
   }
 }
 ```
 
-## Adding a new job board
+## Pipeline
 
-1. Create `src/scrapers/my-board.ts` exporting `async function scrapeMyBoard(browser: Browser): Promise<ScrapeResult>`
-2. Add the source to `JobSource` type in `src/types.ts`
-3. Add the label to `SOURCE_LABELS` in `src/email/send-email.ts`
-4. Call it in `src/index.ts` (before LinkedIn)
+```
+Scrape (with inline filtering)
+  → Global filter (hard exclusions → required inclusions → priority flags)
+  → Deduplication (SHA-256 vs seen-jobs.json)
+  → AI Classification (Claude Haiku: strong / weak / excluded)
+  → Email (strong matches + other matches, grouped by source)
+  → Persist (seen-jobs.json + runs.log)
+```
+
+## Job Sources
+
+| Source | Auth Required | Geo Support | Notes |
+|---|---|---|---|
+| LinkedIn | Email+password or cookies | Yes (geoId) | Human-like interaction delays |
+| YC / Work at a Startup | Email+password | No (always global) | Infinite scroll, React hydration |
+| Anywhere Remote Jobs | None | Yes (country param) | Pagination, relative date parsing |
+| Working Nomads | None | Yes (region param) | "Show more" button pagination |
+
+## AI Classification
+
+After filtering and dedup, new jobs are classified by Claude Haiku into:
+
+- **Strong** — Target role with target skills central to the job
+- **Weak** — Incidental skill match or tangentially related
+- **Excluded** — Not relevant or requires languages outside config
+
+If `ANTHROPIC_API_KEY` is not set, all jobs default to "strong" (graceful degradation).
+
+## GitHub Actions
+
+The workflow (`.github/workflows/job-search.yml`) runs daily and:
+1. Scrapes all sources
+2. Filters, deduplicates, and classifies
+3. Sends email digest
+4. Commits updated `seen-jobs.json` and `runs.log` back to the repo
+
+Secrets required: `BROWSERLESS_API_KEY`, `RESEND_API_KEY`, `MY_EMAIL`, `FROM_EMAIL`, `ANTHROPIC_API_KEY`, `LINKEDIN_EMAIL`, `LINKEDIN_PASSWORD`, `LINKEDIN_COOKIES`, `YC_EMAIL`, `YC_PASSWORD`.
+
+## Dev vs Production
+
+| Behavior | Development | Production |
+|---|---|---|
+| Browser | Local Chrome | Browserless.io |
+| `raw-jobs.json` | Saved | Not saved |
+| `excluded-jobs.json` | Saved | Not saved |
+| Email if no jobs | Skipped | Sent |
+| `runs.log` | Not appended | Appended |
+
+## Tech Stack
+
+- **TypeScript** + ts-node (ESM)
+- **puppeteer-core** — Headless browser automation
+- **@anthropic-ai/sdk** — AI job classification
+- **resend** — Email delivery
+- **GitHub Actions** — Scheduling + state persistence
