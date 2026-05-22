@@ -1,8 +1,6 @@
 name: "Job Search \u2014 YCombinator"
 
 on:
-  schedule:
-    - cron: '22 5 * * *'   # 5:22 UTC daily (6:22 CET)
   workflow_dispatch:
 
 concurrency:

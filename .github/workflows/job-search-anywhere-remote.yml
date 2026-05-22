@@ -1,8 +1,6 @@
 name: "Job Search \u2014 Anywhere Remote"
 
 on:
-  schedule:
-    - cron: '2 5 * * *'    # 5:02 UTC daily (6:02 CET)
   workflow_dispatch:
 
 concurrency:

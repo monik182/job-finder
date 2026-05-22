@@ -1,8 +1,6 @@
 name: "Job Search \u2014 LinkedIn"
 
 on:
-  schedule:
-    - cron: '32 * * * *'   # Every hour at :32
   workflow_dispatch:
 
 concurrency:
