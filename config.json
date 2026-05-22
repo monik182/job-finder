@@ -1,7 +1,7 @@
 {
   "scraping": {
-    "maxPages": 2,
-    "maxJobs": 20,
+    "maxPages": 10,
+    "maxJobs": 100,
     "maxAgeDays": 7,
     "minDelayMs": 1000
   },
