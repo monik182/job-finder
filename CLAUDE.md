@@ -160,6 +160,7 @@ Extends `FilteredJob`; output of AI classification, input to email.
 extends FilteredJob {
   aiMatch: AIMatch;
   aiReason: string;             // e.g. "Core React role at mid-size startup"
+  isRecruiter?: boolean;        // True if AI detected a recruiting/staffing agency
 }
 ```
 

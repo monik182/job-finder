@@ -22,6 +22,7 @@ export type AIMatch = 'strong' | 'weak' | 'excluded';
 export interface AIClassifiedJob extends FilteredJob {
   aiMatch: AIMatch;
   aiReason: string;
+  isRecruiter?: boolean;
 }
 
 export interface SeenJobsStore {

@@ -40,6 +40,10 @@ function jobCard(job: AIClassifiedJob, showAiReason = false): string {
     ? `<p style="margin:6px 0 0;color:#64748b;font-size:13px;line-height:1.5;">${escapeHtml(descTrimmed)}</p>`
     : '';
 
+  const recruiterBadge = job.isRecruiter
+    ? `<span style="display:inline-block;background:#fef2f2;color:#dc2626;padding:2px 8px;border-radius:12px;font-size:12px;margin-right:4px;border:1px solid #fecaca;">⚠️ Recruiting agency</span>`
+    : '';
+
   const aiReasonHtml =
     showAiReason && job.aiReason
       ? `<p style="margin:4px 0 0;font-size:11px;color:#9ca3af;font-style:italic;">AI note: ${escapeHtml(job.aiReason)}</p>`
@@ -58,7 +62,7 @@ function jobCard(job: AIClassifiedJob, showAiReason = false): string {
       </p>
       ${descHtml}
       ${aiReasonHtml}
-      ${priorityBadges ? `<div style="margin-top:8px;">${priorityBadges}</div>` : ''}
+      ${priorityBadges || recruiterBadge ? `<div style="margin-top:8px;">${priorityBadges}${recruiterBadge}</div>` : ''}
     </div>`;
 }
 

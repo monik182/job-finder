@@ -24,8 +24,14 @@ async function withConcurrencyLimit<T>(
   return results;
 }
 
-function parseAIResponse(text: string): { match: 'strong' | 'weak' | 'excluded'; reason: string } | null {
-  const isValidResponse = (parsed: unknown): parsed is { match: 'strong' | 'weak' | 'excluded'; reason: string } => {
+interface AIResponse {
+  match: 'strong' | 'weak' | 'excluded';
+  reason: string;
+  isRecruiter?: boolean;
+}
+
+function parseAIResponse(text: string): AIResponse | null {
+  const isValidResponse = (parsed: unknown): parsed is AIResponse => {
     if (!parsed || typeof parsed !== 'object') return false;
     const p = parsed as Record<string, unknown>;
     return (
@@ -34,12 +40,16 @@ function parseAIResponse(text: string): { match: 'strong' | 'weak' | 'excluded';
     );
   };
 
+  const extractResponse = (raw: unknown): AIResponse | null => {
+    const p = raw as Record<string, unknown>;
+    if (!isValidResponse(raw)) return null;
+    return { match: raw.match, reason: raw.reason, isRecruiter: p['isRecruiter'] === true ? true : undefined };
+  };
+
   // Try direct JSON parse first
   try {
-    const parsed = JSON.parse(text) as unknown;
-    if (isValidResponse(parsed)) {
-      return { match: parsed.match, reason: parsed.reason };
-    }
+    const result = extractResponse(JSON.parse(text) as unknown);
+    if (result) return result;
   } catch {
     // fall through
   }
@@ -48,10 +58,8 @@ function parseAIResponse(text: string): { match: 'strong' | 'weak' | 'excluded';
   const match = /\{[^{}]*"match"\s*:\s*"(strong|weak|excluded)"[^{}]*\}/.exec(text);
   if (match?.[0]) {
     try {
-      const parsed = JSON.parse(match[0]) as unknown;
-      if (isValidResponse(parsed)) {
-        return { match: parsed.match, reason: parsed.reason };
-      }
+      const result = extractResponse(JSON.parse(match[0]) as unknown);
+      if (result) return result;
     } catch {
       // fall through
     }
@@ -72,7 +80,9 @@ async function classifyJob(
   const allowedLanguages = config.filters.language.join(', ');
   const desc = job.description.slice(0, 400);
 
-  const prompt = `You are a job relevance classifier. Evaluate this job listing on two criteria.
+  const isReposted = job.isReposted ? '\nReposted: yes' : '';
+
+  const prompt = `You are a job relevance classifier. Evaluate this job listing on the following criteria.
 
 CRITERIA 1 — Language:
 Allowed languages: ${allowedLanguages}
@@ -80,16 +90,22 @@ Allowed languages: ${allowedLanguages}
 - If the job post requires the candidate to speak a language other than [${allowedLanguages}] (even if the post is in English), classify as "excluded".
 - A job that requires English OR Spanish (or both) is acceptable.
 
-CRITERIA 2 — Role relevance (only apply if not excluded by criteria 1):
+CRITERIA 2 — Reposted jobs:
+- If the job is marked as reposted, classify as "excluded" with reason "reposted job listing".
+
+CRITERIA 3 — Role relevance (only apply if not excluded by criteria 1 or 2):
 The user is looking for remote ${jobTitles} roles using: ${skills}.
 - "strong": the role is primarily a ${jobTitles} position where ${skills} are central to the work.
 - "weak": the role passed keyword filters but is actually a backend, DevOps, data, QA, or other role where the target skills appear only incidentally.
 
+CRITERIA 4 — Recruiting company detection:
+Determine if the company posting the job is a recruiting/staffing agency rather than the actual employer. Signs include: the company name contains words like "staffing", "recruiting", "talent", "placement", "consultancy"; the description mentions placing candidates at client companies; the job is generic/templated. Set "isRecruiter" to true if so.
+
 Title: ${job.title}
-Company: ${job.company}
+Company: ${job.company}${isReposted}
 Description: ${desc}
 
-Respond with JSON only: {"match": "strong" | "weak" | "excluded", "reason": "<one sentence>"}`;
+Respond with JSON only: {"match": "strong" | "weak" | "excluded", "reason": "<one sentence>", "isRecruiter": true | false}`;
 
   try {
     const message = await client.messages.create({
@@ -103,8 +119,8 @@ Respond with JSON only: {"match": "strong" | "weak" | "excluded", "reason": "<on
     const parsed = parseAIResponse(text);
 
     if (parsed) {
-      console.log(`[ai-filter] ${index}/${total} "${job.title} @ ${job.company}" → ${parsed.match}`);
-      return { ...job, aiMatch: parsed.match, aiReason: parsed.reason };
+      console.log(`[ai-filter] ${index}/${total} "${job.title} @ ${job.company}" → ${parsed.match}${parsed.isRecruiter ? ' [recruiter]' : ''}`);
+      return { ...job, aiMatch: parsed.match, aiReason: parsed.reason, isRecruiter: parsed.isRecruiter || undefined };
     }
 
     console.warn(`[ai-filter] ${index}/${total} "${job.title}" — could not parse response, defaulting to strong`);
