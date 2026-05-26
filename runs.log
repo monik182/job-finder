@@ -34,3 +34,4 @@
 {"startedAt":"2026-05-22T21:02:51.400Z","finishedAt":"2026-05-22T21:03:53.066Z","seenJobsTotal":67,"rawJobsFound":9,"newJobsFound":3,"excludedJobs":{"bySource":{"anywhere-remote":6},"total":6},"errors":{"bySource":{},"global":[]}}
 {"startedAt":"2026-05-23T20:57:01.955Z","finishedAt":"2026-05-23T20:58:05.945Z","seenJobsTotal":67,"rawJobsFound":10,"newJobsFound":3,"excludedJobs":{"bySource":{"anywhere-remote":7},"total":7},"errors":{"bySource":{},"global":[]}}
 {"startedAt":"2026-05-26T13:54:57.726Z","finishedAt":"2026-05-26T13:55:57.935Z","seenJobsTotal":67,"rawJobsFound":8,"newJobsFound":0,"excludedJobs":{"bySource":{"working-nomads":8},"total":8},"errors":{"bySource":{},"global":[]}}
+{"startedAt":"2026-05-26T13:57:50.611Z","finishedAt":"2026-05-26T13:58:54.806Z","seenJobsTotal":67,"rawJobsFound":10,"newJobsFound":6,"excludedJobs":{"bySource":{"anywhere-remote":4},"total":4},"errors":{"bySource":{},"global":[]}}
