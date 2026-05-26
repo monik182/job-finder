@@ -1,7 +1,7 @@
 {
   "scraping": {
-    "maxPages": 10,
-    "maxJobs": 100,
+    "maxPages": 20,
+    "maxJobs": 150,
     "maxAgeDays": 7,
     "minDelayMs": 1000
   },
@@ -12,18 +12,27 @@
     ],
     "skills": [
       "react",
+      "react.js",
+      "reactjs",
       "typescript",
+      "javascript",
       "angular",
-      "nextjs"
+      "next.js",
+      "nextjs",
+      "node",
+      "node.js"
     ],
     "jobTitle": [
       "frontend",
-      "front-end"
+      "front-end",
+      "fullstack",
+      "full-stack"
     ],
     "excludedCompanies": [
       "micro1",
       "proxify",
-      "epam"
+      "epam",
+      "jobtogether"
     ],
     "excludeUsOnly": true,
     "excludeIndia": true,

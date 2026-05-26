@@ -25,7 +25,7 @@ When making major changes to this project (new scrapers, new pipeline phases, co
 - **Browser automation:** puppeteer-core 22.15.0 (connects to Browserless.io in prod, local Chrome in dev)
 - **AI classification:** @anthropic-ai/sdk (Claude Haiku 4.5)
 - **Email:** resend 3.5.0
-- **Scheduling:** GitHub Actions cron (per-source workflows at `2 5 * * *`, LinkedIn also every 2h)
+- **Scheduling:** GitHub Actions cron (all per-source workflows every 4h starting 0 CET, spaced 10 min apart)
 
 ---
 
@@ -56,10 +56,10 @@ job-finder/
 │       └── send-email.ts         # Resend integration + HTML templating
 ├── .github/workflows/
 │   ├── job-search.yml            # All sources (manual trigger only)
-│   ├── job-search-linkedin.yml   # LinkedIn (daily + every 2h)
-│   ├── job-search-anywhere-remote.yml  # Anywhere Remote (daily)
-│   ├── job-search-working-nomads.yml   # Working Nomads (daily)
-│   └── job-search-ycombinator.yml      # YCombinator (daily)
+│   ├── job-search-anywhere-remote.yml  # Anywhere Remote (every 4h from 0 CET)
+│   ├── job-search-working-nomads.yml   # Working Nomads (every 4h from 0 CET, +10 min)
+│   ├── job-search-ycombinator.yml      # YCombinator (every 4h from 0 CET, +20 min)
+│   └── job-search-linkedin.yml         # LinkedIn (every 4h from 0 CET, +30 min)
 ├── package.json
 ├── tsconfig.json                 # strict mode, ESNext
 ├── config.json                   # User-editable search & filter settings
@@ -556,12 +556,12 @@ Only jobs that pass AI classification (strong + weak) are persisted to `seen-job
 
 Each source has its own workflow running `npm start -- --source=<name>`:
 
-| Workflow | Schedule | Concurrency group |
-|---|---|---|
-| `job-search-anywhere-remote.yml` | `2 5 * * *` (daily 6:02 CET) | `job-search-anywhere-remote` |
-| `job-search-working-nomads.yml` | `12 5 * * *` (daily 6:12 CET) | `job-search-working-nomads` |
-| `job-search-ycombinator.yml` | `22 5 * * *` (daily 6:22 CET) | `job-search-ycombinator` |
-| `job-search-linkedin.yml` | `32 * * * *` (every hour at :32) | `job-search-linkedin` |
+| Workflow | Schedule (UTC) | CET times | Concurrency group |
+|---|---|---|---|
+| `job-search-anywhere-remote.yml` | `0 23,3,7,11,15,19 * * *` | 0:00, 4:00, 8:00, 12:00, 16:00, 20:00 | `job-search-anywhere-remote` |
+| `job-search-working-nomads.yml` | `10 23,3,7,11,15,19 * * *` | +10 min | `job-search-working-nomads` |
+| `job-search-ycombinator.yml` | `20 23,3,7,11,15,19 * * *` | +20 min | `job-search-ycombinator` |
+| `job-search-linkedin.yml` | `30 23,3,7,11,15,19 * * *` | +30 min | `job-search-linkedin` |
 
 All workflows: `workflow_dispatch` enabled, `contents: write` permissions.
 Steps: Checkout → Node.js 20 → `npm ci` → (LinkedIn: restore cookies) → `npm start -- --source=X` → Commit `seen-jobs.json` + `runs.log` → Push.

@@ -2,6 +2,8 @@ name: "Job Search \u2014 Working Nomads"
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '10 23,3,7,11,15,19 * * *'
 
 concurrency:
   group: job-search-working-nomads

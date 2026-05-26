@@ -11,7 +11,7 @@ Automated daily job search that scrapes multiple job boards, filters results wit
 5. **Email** a curated HTML digest via Resend, with strong and weaker matches separated
 6. **Persist** state back to the repo via GitHub Actions
 
-Each source runs on its own scheduled GitHub Actions workflow at 6:02 AM CET daily. LinkedIn also runs every 2 hours. An all-sources workflow is available via manual `workflow_dispatch`.
+Each source runs on its own scheduled GitHub Actions workflow every 4 hours starting at 0:00 CET, spaced 10 minutes apart (LinkedIn runs last). An all-sources workflow is available via manual `workflow_dispatch`.
 
 ## Setup
 
@@ -145,13 +145,13 @@ If `ANTHROPIC_API_KEY` is not set, all jobs default to "strong" (graceful degrad
 
 Each source has its own workflow in `.github/workflows/`:
 
-| Workflow | Schedule |
-|---|---|
-| `job-search-linkedin.yml` | Every 2 hours + daily at 6:02 CET |
-| `job-search-anywhere-remote.yml` | Daily at 6:02 CET |
-| `job-search-working-nomads.yml` | Daily at 6:02 CET |
-| `job-search-ycombinator.yml` | Daily at 6:02 CET |
-| `job-search.yml` | Manual only (all sources) |
+| Workflow | Schedule (UTC) | CET times |
+|---|---|---|
+| `job-search-anywhere-remote.yml` | `0 23,3,7,11,15,19 * * *` | 0:00, 4:00, 8:00, 12:00, 16:00, 20:00 |
+| `job-search-working-nomads.yml` | `10 23,3,7,11,15,19 * * *` | +10 min |
+| `job-search-ycombinator.yml` | `20 23,3,7,11,15,19 * * *` | +20 min |
+| `job-search-linkedin.yml` | `30 23,3,7,11,15,19 * * *` | +30 min |
+| `job-search.yml` | Manual only | (all sources) |
 
 Each workflow scrapes its source, filters, deduplicates, classifies, sends an email digest, and commits `seen-jobs.json` + `runs.log`. Concurrency groups prevent overlapping runs per source.
 

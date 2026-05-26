@@ -2,6 +2,8 @@ name: "Job Search \u2014 Anywhere Remote"
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 23,3,7,11,15,19 * * *'
 
 concurrency:
   group: job-search-anywhere-remote
