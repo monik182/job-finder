@@ -1394,3 +1394,4 @@
 {"startedAt":"2026-07-22T16:53:36.637Z","finishedAt":"2026-07-22T16:53:46.985Z","seenJobsTotal":90,"rawJobsFound":0,"newJobsFound":0,"excludedJobs":{"bySource":{},"total":0},"errors":{"bySource":{},"global":[]}}
 {"startedAt":"2026-07-22T20:05:00.325Z","finishedAt":"2026-07-22T20:06:08.406Z","seenJobsTotal":92,"rawJobsFound":34,"newJobsFound":20,"excludedJobs":{"bySource":{"anywhere-remote":14},"total":14},"errors":{"bySource":{},"global":[]}}
 {"startedAt":"2026-07-22T20:19:24.902Z","finishedAt":"2026-07-22T20:20:25.382Z","seenJobsTotal":92,"rawJobsFound":0,"newJobsFound":0,"excludedJobs":{"bySource":{},"total":0},"errors":{"bySource":{},"global":[]}}
+{"startedAt":"2026-07-22T20:32:06.649Z","finishedAt":"2026-07-22T20:32:14.034Z","seenJobsTotal":92,"rawJobsFound":0,"newJobsFound":0,"excludedJobs":{"bySource":{},"total":0},"errors":{"bySource":{"ycombinator":["[ycombinator] Login error: No element found for selector: input#password-input"]},"global":[]}}
