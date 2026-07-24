@@ -9,7 +9,7 @@ TypeScript-based daily job search automation that:
 4. Classifies jobs using AI (Claude Haiku) into strong/weak/excluded matches
 5. Deduplicates against previously seen jobs using SHA-256 hashing
 6. Sends curated HTML email digests via Resend (strong matches + weaker matches separated)
-7. Runs daily at 6:02 AM CET via GitHub Actions (per-source workflows)
+7. Runs every 4 hours via GitHub Actions (per-source workflows for Anywhere Remote, Working Nomads, YCombinator); LinkedIn runs only via the manual all-sources workflow or local dev
 8. Persists state (seen job hashes, run logs) back to the repository
 
 ## Important
@@ -25,7 +25,7 @@ When making major changes to this project (new scrapers, new pipeline phases, co
 - **Browser automation:** puppeteer-core 22.15.0 (connects to Browserless.io in prod, local Chrome in dev)
 - **AI classification:** @anthropic-ai/sdk (Claude Haiku 4.5)
 - **Email:** resend 3.5.0
-- **Scheduling:** GitHub Actions cron (all per-source workflows every 4h starting 0 CET, spaced 10 min apart)
+- **Scheduling:** GitHub Actions cron (Anywhere Remote, Working Nomads, YCombinator per-source workflows every 4h starting 0 CET, spaced 10 min apart; LinkedIn is manual-only)
 
 ---
 
@@ -58,8 +58,7 @@ job-finder/
 │   ├── job-search.yml            # All sources (manual trigger only)
 │   ├── job-search-anywhere-remote.yml  # Anywhere Remote (every 4h from 0 CET)
 │   ├── job-search-working-nomads.yml   # Working Nomads (every 4h from 0 CET, +10 min)
-│   ├── job-search-ycombinator.yml      # YCombinator (every 4h from 0 CET, +20 min)
-│   └── job-search-linkedin.yml         # LinkedIn (every 4h from 0 CET, +30 min)
+│   └── job-search-ycombinator.yml      # YCombinator (every 4h from 0 CET, +20 min)
 ├── package.json
 ├── tsconfig.json                 # strict mode, ESNext
 ├── config.json                   # User-editable search & filter settings
@@ -561,14 +560,15 @@ Each source has its own workflow running `npm start -- --source=<name>`:
 | `job-search-anywhere-remote.yml` | `0 23,3,7,11,15,19 * * *` | 0:00, 4:00, 8:00, 12:00, 16:00, 20:00 | `job-search-anywhere-remote` |
 | `job-search-working-nomads.yml` | `10 23,3,7,11,15,19 * * *` | +10 min | `job-search-working-nomads` |
 | `job-search-ycombinator.yml` | `20 23,3,7,11,15,19 * * *` | +20 min | `job-search-ycombinator` |
-| `job-search-linkedin.yml` | `30 23,3,7,11,15,19 * * *` | +30 min | `job-search-linkedin` |
 
 All workflows: `workflow_dispatch` enabled, `contents: write` permissions.
-Steps: Checkout → Node.js 20 → `npm ci` → (LinkedIn: restore cookies) → `npm start -- --source=X` → Commit `seen-jobs.json` + `runs.log` → Push.
+Steps: Checkout → Node.js 20 → `npm ci` → `npm start -- --source=X` → Commit `seen-jobs.json` + `runs.log` → Push.
+
+LinkedIn has no scheduled workflow — it runs only via the manual all-sources workflow (`job-search.yml`) or local dev commands (`npm run dev:linkedin`).
 
 ### All-sources workflow (manual only)
 
-`job-search.yml` — Runs all scrapers. Trigger: `workflow_dispatch` only (no schedule).
+`job-search.yml` — Runs all scrapers, including LinkedIn. Trigger: `workflow_dispatch` only (no schedule).
 
 ---
 
