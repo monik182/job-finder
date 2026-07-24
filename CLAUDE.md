@@ -35,6 +35,7 @@ When making major changes to this project (new scrapers, new pipeline phases, co
 job-finder/
 ├── src/
 │   ├── index.ts                  # Main orchestrator — 8-phase pipeline
+│   ├── worldwide-engineering.ts  # Standalone entry: Worldwide scrape, all engineering roles
 │   ├── types.ts                  # All shared TypeScript interfaces
 │   ├── config.ts                 # Config loader + AppConfig type
 │   ├── browser.ts                # Puppeteer lifecycle (connect/disconnect)
@@ -45,7 +46,8 @@ job-finder/
 │   │   ├── utils.ts              # newPage, delay, safeGoto, parseRelativeDate
 │   │   ├── linkedin.ts           # LinkedIn Jobs scraper
 │   │   ├── ycombinator.ts        # Work at a Startup scraper
-│   │   ├── anywhere-remote.ts    # Anywhere Remote Jobs scraper
+│   │   ├── anywhere-remote.ts    # Anywhere Remote Jobs scraper (exports SEL, extractArticles, getNextPageUrl)
+│   │   ├── anywhere-remote-worldwide.ts  # Fixed Worldwide URL, 10 pages, engineering-only
 │   │   └── working-nomads.ts     # Working Nomads scraper
 │   ├── filters/
 │   │   ├── filter-jobs.ts        # 3-pass filter + priority scoring
@@ -58,7 +60,8 @@ job-finder/
 │   ├── job-search.yml            # All sources (manual trigger only)
 │   ├── job-search-anywhere-remote.yml  # Anywhere Remote (every 4h from 0 CET)
 │   ├── job-search-working-nomads.yml   # Working Nomads (every 4h from 0 CET, +10 min)
-│   └── job-search-ycombinator.yml      # YCombinator (every 4h from 0 CET, +20 min)
+│   ├── job-search-ycombinator.yml      # YCombinator (every 4h from 0 CET, +20 min)
+│   └── job-search-worldwide-engineering.yml  # Worldwide engineering (every 4h from 0 CET, +30 min)
 ├── package.json
 ├── tsconfig.json                 # strict mode, ESNext
 ├── config.json                   # User-editable search & filter settings
@@ -109,8 +112,22 @@ npm run dev:linkedin         # Dev: only LinkedIn scraper
 npm run dev:anywhere-remote  # Dev: only Anywhere Remote scraper
 npm run dev:working-nomads   # Dev: only Working Nomads scraper
 npm run dev:ycombinator      # Dev: only YC scraper
+npm run dev:worldwide-engineering    # Dev: standalone Worldwide engineering scrape
+npm run start:worldwide-engineering  # Prod: standalone Worldwide engineering scrape
 npm run typecheck            # tsc --noEmit
 ```
+
+### Worldwide engineering scrape (`src/worldwide-engineering.ts`)
+
+Standalone entry point, separate from the main 8-phase pipeline. Scrapes a fixed URL
+(`https://anywhereremotejobs.com/remote-jobs?country[]=Worldwide&hide_reposts=1`),
+paginates the first 10 pages (hardcoded, ignores `maxPages`), and keeps ALL
+engineering/programming roles regardless of seniority via a keyword regex over title +
+tags (`scrapeAnywhereRemoteWorldwide` in `src/scrapers/anywhere-remote-worldwide.ts`).
+It **bypasses** the config `skills`/`jobTitle` filter and all `filter-jobs.ts` hard
+exclusions — only dedup (`seen-jobs.json`), AI classification, and the language filter
+narrow results. Shares the same `seen-jobs.json` and `runs.log` as the main pipeline.
+Reuses `SEL`, `extractArticles`, `getNextPageUrl` exported from `anywhere-remote.ts`.
 
 Per-source scripts can be combined with other flags: `npm run dev:linkedin -- --hours=48`
 
@@ -560,6 +577,7 @@ Each source has its own workflow running `npm start -- --source=<name>`:
 | `job-search-anywhere-remote.yml` | `0 23,3,7,11,15,19 * * *` | 0:00, 4:00, 8:00, 12:00, 16:00, 20:00 | `job-search-anywhere-remote` |
 | `job-search-working-nomads.yml` | `10 23,3,7,11,15,19 * * *` | +10 min | `job-search-working-nomads` |
 | `job-search-ycombinator.yml` | `20 23,3,7,11,15,19 * * *` | +20 min | `job-search-ycombinator` |
+| `job-search-worldwide-engineering.yml` | `30 23,3,7,11,15,19 * * *` | +30 min | `job-search-worldwide-engineering` |
 
 All workflows: `workflow_dispatch` enabled, `contents: write` permissions.
 Steps: Checkout → Node.js 20 → `npm ci` → `npm start -- --source=X` → Commit `seen-jobs.json` + `runs.log` → Push.

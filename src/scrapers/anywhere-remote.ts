@@ -35,7 +35,7 @@ function buildJobsUrl(country: string, skill: string, experience: string): strin
 }
 
 // Selectors — update here if the site changes
-const SEL = {
+export const SEL = {
   // Page-level
   jobsContainer: 'section#jobs-list-container',
   jobArticle: 'section#jobs-list-container article',
@@ -49,12 +49,61 @@ const SEL = {
   articleTagItems: ':scope div:last-child div:last-child div',
 } as const;
 
-interface RawJobData {
+export interface RawJobData {
   title: string;
   company: string;
   dateText: string;
   url: string;
   tags: string;
+}
+
+export async function extractArticles(page: Page): Promise<RawJobData[]> {
+  return page.evaluate(
+    (selectors: typeof SEL, baseUrl: string): RawJobData[] => {
+      const results: RawJobData[] = [];
+      const articles = document.querySelectorAll(selectors.jobArticle);
+
+      articles.forEach((article) => {
+        const linkEl = article.querySelector(selectors.articleLink);
+        const dateEl = article.querySelector(selectors.articleDate);
+        const companyEl = article.querySelector(selectors.articleCompany);
+        const titleEl = article.querySelector(selectors.articleTitle);
+        const tagEls = article.querySelectorAll(selectors.articleTagItems);
+
+        const relativeUrl =
+          linkEl instanceof HTMLAnchorElement ? linkEl.getAttribute('href') ?? '' : '';
+        const url = relativeUrl.startsWith('http')
+          ? relativeUrl
+          : `${baseUrl}${relativeUrl}`;
+
+        const title = titleEl?.textContent?.trim() ?? '';
+        const company = companyEl?.textContent?.trim() ?? '';
+        const dateText = dateEl?.textContent?.trim() ?? '';
+        const tags = Array.from(tagEls)
+          .map((t) => t.textContent?.trim() ?? '')
+          .filter(Boolean)
+          .join(', ');
+
+        if (title && url) {
+          results.push({ title, company, dateText, url, tags });
+        }
+      });
+
+      return results;
+    },
+    SEL,
+    BASE_URL,
+  );
+}
+
+export async function getNextPageUrl(page: Page): Promise<string | null> {
+  return page.evaluate((nextSel: string, baseUrl: string): string | null => {
+    const nextBtn = document.querySelector(nextSel);
+    if (!(nextBtn instanceof HTMLAnchorElement)) return null;
+    const href = nextBtn.getAttribute('href') ?? '';
+    if (!href) return null;
+    return href.startsWith('http') ? href : `${baseUrl}${href}`;
+  }, SEL.nextPage, BASE_URL);
 }
 
 async function scrapeOneCombination(
@@ -93,42 +142,7 @@ async function scrapeOneCombination(
     }
 
     try {
-      const rawJobs = await page.evaluate(
-        (selectors: typeof SEL, baseUrl: string): RawJobData[] => {
-          const results: RawJobData[] = [];
-          const articles = document.querySelectorAll(selectors.jobArticle);
-
-          articles.forEach((article) => {
-            const linkEl = article.querySelector(selectors.articleLink);
-            const dateEl = article.querySelector(selectors.articleDate);
-            const companyEl = article.querySelector(selectors.articleCompany);
-            const titleEl = article.querySelector(selectors.articleTitle);
-            const tagEls = article.querySelectorAll(selectors.articleTagItems);
-
-            const relativeUrl =
-              linkEl instanceof HTMLAnchorElement ? linkEl.getAttribute('href') ?? '' : '';
-            const url = relativeUrl.startsWith('http')
-              ? relativeUrl
-              : `${baseUrl}${relativeUrl}`;
-
-            const title = titleEl?.textContent?.trim() ?? '';
-            const company = companyEl?.textContent?.trim() ?? '';
-            const dateText = dateEl?.textContent?.trim() ?? '';
-            const tags = Array.from(tagEls)
-              .map((t) => t.textContent?.trim() ?? '')
-              .filter(Boolean)
-              .join(', ');
-
-            if (title && url) {
-              results.push({ title, company, dateText, url, tags });
-            }
-          });
-
-          return results;
-        },
-        SEL,
-        BASE_URL,
-      );
+      const rawJobs = await extractArticles(page);
 
       const batchJobs: RawJob[] = [];
       for (const raw of rawJobs) {
@@ -157,13 +171,7 @@ async function scrapeOneCombination(
 
       if (jobs.length >= config.scraping.maxJobs) break;
 
-      const nextUrl = await page.evaluate((nextSel: string, baseUrl: string): string | null => {
-        const nextBtn = document.querySelector(nextSel);
-        if (!(nextBtn instanceof HTMLAnchorElement)) return null;
-        const href = nextBtn.getAttribute('href') ?? '';
-        if (!href) return null;
-        return href.startsWith('http') ? href : `${baseUrl}${href}`;
-      }, SEL.nextPage, BASE_URL);
+      const nextUrl = await getNextPageUrl(page);
 
       currentUrl = nextUrl;
       pageNum++;

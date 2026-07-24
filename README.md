@@ -69,6 +69,11 @@ npm run dev:headed
 # Production (no .env, secrets from environment)
 npm start
 
+# Worldwide engineering scrape (standalone: fixed Worldwide URL, first 10 pages,
+# all engineering/programming roles regardless of seniority; bypasses config skill filter)
+npm run dev:worldwide-engineering
+npm run start:worldwide-engineering
+
 # Type check
 npm run typecheck
 ```
@@ -150,6 +155,7 @@ Each source has its own workflow in `.github/workflows/`:
 | `job-search-anywhere-remote.yml` | `0 23,3,7,11,15,19 * * *` | 0:00, 4:00, 8:00, 12:00, 16:00, 20:00 |
 | `job-search-working-nomads.yml` | `10 23,3,7,11,15,19 * * *` | +10 min |
 | `job-search-ycombinator.yml` | `20 23,3,7,11,15,19 * * *` | +20 min |
+| `job-search-worldwide-engineering.yml` | `30 23,3,7,11,15,19 * * *` | +30 min (Worldwide, all engineering roles) |
 | `job-search.yml` | Manual only | (all sources, including LinkedIn) |
 
 Each workflow scrapes its source, filters, deduplicates, classifies, sends an email digest, and commits `seen-jobs.json` + `runs.log`. Concurrency groups prevent overlapping runs per source.
