@@ -3,7 +3,7 @@ name: "Job Search \u2014 LinkedIn"
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 23,3,7,11,15,19 * * *'
+    - cron: 
 
 concurrency:
   group: job-search-linkedin
