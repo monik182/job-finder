@@ -1768,3 +1768,4 @@
 {"startedAt":"2026-08-21T08:04:00.236Z","finishedAt":"2026-08-21T08:04:44.183Z","seenJobsTotal":839,"rawJobsFound":136,"newJobsFound":0,"excludedJobs":{"bySource":{},"total":0},"errors":{"bySource":{},"global":[]}}
 {"startedAt":"2026-08-21T11:15:38.754Z","finishedAt":"2026-08-21T11:16:40.975Z","seenJobsTotal":839,"rawJobsFound":6,"newJobsFound":0,"excludedJobs":{"bySource":{"anywhere-remote":6},"total":6},"errors":{"bySource":{},"global":[]}}
 {"startedAt":"2026-08-21T11:49:52.378Z","finishedAt":"2026-08-21T11:50:33.775Z","seenJobsTotal":840,"rawJobsFound":137,"newJobsFound":1,"excludedJobs":{"bySource":{},"total":0},"errors":{"bySource":{},"global":[]}}
+{"startedAt":"2026-08-21T15:21:37.919Z","finishedAt":"2026-08-21T15:22:39.497Z","seenJobsTotal":840,"rawJobsFound":6,"newJobsFound":0,"excludedJobs":{"bySource":{"anywhere-remote":6},"total":6},"errors":{"bySource":{},"global":[]}}
