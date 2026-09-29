@@ -2,8 +2,6 @@ name: "Job Search — Worldwide Engineering"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '30 23,3,7,11,15,19 * * *'
 
 concurrency:
   group: job-search-worldwide-engineering
